@@ -226,8 +226,28 @@ disk, that is the one cost you cannot design around.
 
 ## Troubleshooting
 
-**Build fails on faiss-cpu.** Confirm `PYTHON_VERSION` is `3.13.7` in the
-environment. Very old Python versions have no matching wheel.
+**Build fails: `Could not find a version that satisfies the requirement faiss-cpu`.**
+Render built on a newer Python than the wheel supports. The log's first lines
+show which version it used:
+
+```
+==> Using Python version 3.14.3 (default)
+```
+
+`(default)` means Render found no version pin. Two things now prevent this:
+
+- `.python-version` in the repo root pins 3.13.7. Render reads this file during
+  the build, and unlike an environment variable it applies even when the service
+  was created outside the blueprint flow.
+- `requirements.txt` uses lower bounds (`faiss-cpu>=1.12`) rather than exact
+  pins, so pip can pick whatever wheel exists for the interpreter in use.
+
+If it still resolves to the wrong Python, set `PYTHON_VERSION=3.13.7` manually
+under **Environment** and redeploy with **Clear build cache**.
+
+**`It looks like we don't have access to your repo`.** The build still works for
+public repositories, but reconnect GitHub under **Account Settings → GitHub** so
+auto-deploy on push works reliably.
 
 **Deploy succeeds but every page 500s.** Check the logs for
 `Configuration is incomplete`. The app refuses to start with missing settings and

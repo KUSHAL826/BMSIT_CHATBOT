@@ -1,23 +1,32 @@
+# Lower bounds are the versions this project is actually tested against, with
+# upper caps only where a major release is known to break the API.
+#
+# Deliberately NOT pinned with == : Render may build on a newer Python than you
+# develop on, and an exact pin fails when no wheel exists for that interpreter.
+# faiss-cpu==1.10.0 had no Python 3.14 wheel, which broke the first deploy.
+
 # Web layer
-flask==3.1.0
-# Production WSGI server (used by Render; not needed for local `python run.py`)
-gunicorn==23.0.0
+flask>=3.1,<4
+# Production WSGI server (Render). Not needed for local `python run.py`.
+gunicorn>=23.0
 
 # Scraping
-beautifulsoup4==4.13.3
-requests==2.32.3
+beautifulsoup4>=4.13,<5
+requests>=2.32,<3
 
 # Document parsing
-pypdf==5.3.0
-python-docx==1.1.2
-olefile==0.47
+pypdf>=5.3,<7
+python-docx>=1.1.2,<2
+olefile>=0.47,<1
 
 # Vector search
-faiss-cpu==1.10.0
-numpy==2.2.3
+# 1.12.0 is the oldest release with wheels for current Python versions.
+faiss-cpu>=1.12
+numpy>=2.2,<3
 
 # Scheduling
-APScheduler==3.11.0
+# APScheduler 4.x is a rewrite with a different API. Do not remove the cap.
+APScheduler>=3.11,<4
 
 # Config
-python-dotenv==1.0.1
+python-dotenv>=1.0,<2
