@@ -35,6 +35,11 @@ def create_app():
     Config.ensure_directories()
     _configure_logging()
 
+    log = logging.getLogger(__name__)
+    log.info("Configuration: %s", Config.source_summary())
+    for warning in Config.warnings():
+        log.warning("Configuration: %s", warning)
+
     app = Flask(
         __name__,
         template_folder=str(Config.BASE_DIR / "templates"),

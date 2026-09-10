@@ -26,15 +26,27 @@ def allowed_file(filename):
 
 def _set_env_var(name, value):
     """
-    Sets a variable for this process and persists it to .env.
+    Sets a variable for the current process.
 
-    On a read-only filesystem the persist step is skipped with a warning; the
-    value still applies until restart. Values are never logged.
+    It is also written back to .env, but ONLY if that file already exists, which
+    is the local-development case. In a hosted environment configuration comes
+    from the platform, so creating a .env there would be misleading: the file
+    would be lost on the next deploy while appearing to be the source of truth.
+    Values are never logged.
     """
     os.environ[name] = value
-    env_path = Config.BASE_DIR / ".env"
+    env_path = Config.ENV_FILE
+
+    if not env_path.exists():
+        print(
+            f"[Admin] {name} updated for this process. No .env file present, so it "
+            "was not persisted. Set it in your host's environment settings "
+            "(Render: Dashboard -> Environment) to survive a restart."
+        )
+        return
+
     try:
-        lines = env_path.read_text(encoding="utf-8").splitlines() if env_path.exists() else []
+        lines = env_path.read_text(encoding="utf-8").splitlines()
         replaced = False
         for index, line in enumerate(lines):
             if line.startswith(f"{name}="):
