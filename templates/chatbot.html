@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Official AI assistant for B.M.S. Institute of Technology and Management, Bengaluru. Ask about admissions, courses, placements, hostels and campus life.">
+  <title>Ask BMSIT &middot; Official AI Assistant</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/chatbot.css') }}">
+</head>
+<body>
+  <a class="skip-link" href="#composer-input">Skip to the question box</a>
+
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">B</div>
+        <div class="brand-text">
+          <h1>Ask BMSIT</h1>
+          <p>B.M.S. Institute of Technology &amp; Management, Bengaluru</p>
+        </div>
+      </div>
+      <div class="topbar-actions">
+        <span class="status-pill" id="kb-status" role="status">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span class="status-label">Connecting</span>
+        </span>
+        <button type="button" class="ghost-button" id="clear-chat">New chat</button>
+      </div>
+    </header>
+
+    <main class="conversation" id="conversation" role="log" aria-live="polite" aria-label="Conversation">
+      <section class="welcome" id="welcome">
+        <h2>How can I help with BMSIT today?</h2>
+        <p>
+          I answer from the college's official website and documents, and I cite the
+          exact page I used. If something is not in there, I will say so rather than guess.
+        </p>
+
+        <div class="suggestions" id="suggestions">
+          <button type="button" class="suggestion" data-q="What engineering branches and courses are offered at BMSIT?">
+            <span class="suggestion-icon" aria-hidden="true">&#127891;</span>
+            <span>
+              <strong>Courses &amp; branches</strong>
+              <small>What programmes can I apply for?</small>
+            </span>
+          </button>
+          <button type="button" class="suggestion" data-q="How do I apply for admission to BMSIT and what is the eligibility?">
+            <span class="suggestion-icon" aria-hidden="true">&#128221;</span>
+            <span>
+              <strong>Admissions</strong>
+              <small>KCET, COMEDK and eligibility</small>
+            </span>
+          </button>
+          <button type="button" class="suggestion" data-q="What are the placement statistics and top recruiters at BMSIT?">
+            <span class="suggestion-icon" aria-hidden="true">&#128200;</span>
+            <span>
+              <strong>Placements</strong>
+              <small>Packages and recruiters</small>
+            </span>
+          </button>
+          <button type="button" class="suggestion" data-q="Tell me about BMSIT hostel facilities and campus amenities">
+            <span class="suggestion-icon" aria-hidden="true">&#127968;</span>
+            <span>
+              <strong>Hostel &amp; campus</strong>
+              <small>Facilities and daily life</small>
+            </span>
+          </button>
+        </div>
+      </section>
+    </main>
+
+    <footer class="composer">
+      <form id="composer" autocomplete="off">
+        <label class="sr-only" for="composer-input">Ask a question about BMSIT</label>
+        <textarea
+          id="composer-input"
+          name="message"
+          rows="1"
+          maxlength="2000"
+          placeholder="Ask about admissions, fees, placements, hostels..."
+          aria-describedby="composer-hint"></textarea>
+        <button type="submit" id="send-button" aria-label="Send question">
+          <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <path d="M3.4 20.4l17.45-7.48a1 1 0 000-1.84L3.4 3.6a1 1 0 00-1.39 1.2l2.06 6.16a1 1 0 00.84.68l8.66.86-8.66.86a1 1 0 00-.84.68L2.01 19.2a1 1 0 001.39 1.2z"/>
+          </svg>
+        </button>
+      </form>
+      <p class="composer-hint" id="composer-hint">
+        Answers come from official BMSIT sources. For decisions, confirm with the college:
+        <a href="mailto:admissions@bmsit.in">admissions@bmsit.in</a> &middot;
+        <a href="tel:+918068730444">+91 80 6873 0444</a>
+      </p>
+    </footer>
+  </div>
+
+  <script src="{{ url_for('static', filename='js/chatbot.js') }}"></script>
+</body>
+</html>

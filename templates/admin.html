@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>BMSIT College AI Agent - Admin & Training Dashboard</title>
+  <link rel="stylesheet" href="/static/css/admin.css">
+</head>
+<body>
+  <div class="admin-container">
+    
+    <!-- Top Header Navigation -->
+    <header class="header">
+      <div class="brand-section">
+        <div class="brand-logo-badge">🎓</div>
+        <div class="brand-title">
+          <h1>BMSIT AI Agent Admin & Training</h1>
+          <p>B.M.S. Institute of Technology and Management | Autonomous RAG Knowledge Base</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="btn-open-settings" class="btn-secondary" title="Configure Gemini API Key">
+          ⚙️ Settings
+        </button>
+        <a href="/chatbot" target="_blank" class="btn-primary" id="link-public-chatbot">
+          🚀 Open Public Chatbot &rarr;
+        </a>
+      </div>
+    </header>
+
+    <!-- Top Key Metrics Cards -->
+    <section class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-icon icon-blue">⚡</div>
+        <div class="metric-info">
+          <span class="metric-label">FAISS Knowledge Vectors</span>
+          <span class="metric-value" id="metric-vectors">{{ rag_stats.total_vectors }}</span>
+          <span class="metric-sub">{{ rag_stats.total_chunks }} semantic chunks</span>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon icon-cyan">📚</div>
+        <div class="metric-info">
+          <span class="metric-label">Trained Sources</span>
+          <span class="metric-value" id="metric-sources">{{ rag_stats.indexed_sources_count }}</span>
+          <span class="metric-sub">Active documents & web runs</span>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon icon-gold">⏰</div>
+        <div class="metric-info">
+          <span class="metric-label">Daily Auto-Scrape</span>
+          <span class="metric-value" style="font-size: 20px;">07:00 AM IST</span>
+          <span class="metric-sub">{{ sched_status.schedule }}</span>
+        </div>
+      </div>
+
+      <div class="metric-card">
+        <div class="metric-icon icon-green">🔍</div>
+        <div class="metric-info">
+          <span class="metric-label">Website Changes</span>
+          <span class="metric-value" id="metric-changes">{{ scrape_state.changes|length }}</span>
+          <span class="metric-sub">Detected in last crawl</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Grid: Scraper + Document Ingestion -->
+    <main class="main-grid">
+      
+      <!-- Left Panel: BMSIT Web Scraper & Change Detector -->
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">🌐 BMSIT Website Knowledge Scraper</h2>
+            <p class="panel-desc">Scrapes college web pages, computes content hashes, and updates RAG vectors.</p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label" for="target-url-input">Target BMSIT College URL</label>
+          <input type="url" id="target-url-input" class="form-input" value="{{ settings.bmsit_url }}" placeholder="https://bmsit.ac.in/">
+        </div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label class="form-label" for="max-pages-input">Max Pages to Crawl</label>
+            <input type="number" id="max-pages-input" class="form-input" value="{{ settings.scrape_max_pages }}" min="5" max="100">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="max-depth-input">Crawl Depth</label>
+            <input type="number" id="max-depth-input" class="form-input" value="{{ settings.scrape_depth }}" min="1" max="5">
+          </div>
+        </div>
+
+        <div class="scraper-action-row">
+          <button id="btn-save-settings" class="btn-secondary">💾 Save Settings</button>
+          <button id="btn-scrape-now" class="btn-primary" style="background: linear-gradient(135deg, #0284c7, #06b6d4);">
+            ⚡ Scrape Now
+          </button>
+        </div>
+
+        <!-- Live Scraper Progress -->
+        <div id="scraper-status-box" class="scraper-status-box">
+          <div id="scraper-status-msg" style="font-size: 13px; font-weight: 500; color: #38bdf8;">Idle</div>
+          <div class="status-bar">
+            <div id="scraper-progress-fill" class="status-bar-fill"></div>
+          </div>
+        </div>
+
+        <!-- Detected Website Changes Box -->
+        <div class="changes-box">
+          <div class="changes-header">
+            <span>Detected Website Changes (Latest Crawl)</span>
+            <span style="color: #94a3b8; font-size: 11px;">Last Run: {{ scrape_state.last_scrape or 'Never' }}</span>
+          </div>
+          <div class="changes-list" id="changes-list-container">
+            {% if scrape_state.changes %}
+              {% for c in scrape_state.changes %}
+                <div class="change-item">
+                  {% if c.change_type == 'NEW' %}
+                    <span class="tag-new">NEW</span>
+                  {% elif c.change_type == 'MODIFIED' %}
+                    <span class="tag-mod">MODIFIED</span>
+                  {% else %}
+                    <span class="tag-del">DELETED</span>
+                  {% endif %}
+                  <span style="font-weight: 500;">{{ c.title }}</span>
+                  <span style="color: #64748b;">- {{ c.summary }}</span>
+                </div>
+              {% endfor %}
+            {% else %}
+              <div style="color: #64748b; font-style: italic; padding: 4px;">{{ scrape_state.summary or 'No changes detected. Website is up to date.' }}</div>
+            {% endif %}
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Panel: Document Ingestion (PDF, DOC, DOCX, CSV) -->
+      <section class="panel">
+        <div class="panel-header">
+          <div>
+            <h2 class="panel-title">📄 Document Ingestion Dropzone</h2>
+            <p class="panel-desc">Upload official brochures, syllabus, notifications, or tabular data.</p>
+          </div>
+        </div>
+
+        <div id="dropzone" class="dropzone">
+          <div class="dropzone-icon">📥</div>
+          <div class="dropzone-title">Click or Drag & Drop Documents Here</div>
+          <div class="dropzone-sub">Files will be parsed, chunked, and embedded into FAISS automatically</div>
+          
+          <div class="supported-badge-row">
+            <span class="format-pill">PDF</span>
+            <span class="format-pill">DOCX</span>
+            <span class="format-pill">DOC</span>
+            <span class="format-pill">CSV</span>
+          </div>
+
+          <input type="file" id="file-input" multiple accept=".pdf,.docx,.doc,.csv" style="display: none;">
+        </div>
+
+        <!-- File List Preview & Upload Action -->
+        <div id="file-preview-list" class="file-list-preview"></div>
+        <div style="margin-top: 14px; text-align: right;">
+          <button id="btn-upload-files" class="btn-primary" style="display: none;">
+            📤 Index Files into RAG
+          </button>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Training History Table -->
+    <section class="history-section">
+      <div class="panel-header">
+        <div>
+          <h2 class="panel-title">📜 Knowledge Training History</h2>
+          <p class="panel-desc">Individual training sources. Deleting any item immediately updates the FAISS vector index.</p>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th>Date & Time (IST)</th>
+              <th>Source & Type</th>
+              <th>Status</th>
+              <th>FAISS Chunks</th>
+              <th>Changes / Details</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="history-table-body">
+            {% if history %}
+              {% for item in history %}
+                <tr id="history-row-{{ item.id }}">
+                  <td>{{ item.date }}</td>
+                  <td>
+                    <div class="source-cell">
+                      <span class="badge-type badge-{{ item.file_type }}">{{ item.file_type|upper }}</span>
+                      <span>{{ item.source }}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <span class="status-badge status-{{ item.status|lower }}">
+                      ● {{ item.status }}
+                    </span>
+                  </td>
+                  <td><strong>{{ item.chunk_count }}</strong></td>
+                  <td>{{ item.changes }}</td>
+                  <td>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                      <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;" data-id="{{ item.id }}" data-file="{{ item.source }}" data-type="{{ item.source_type }}" title="View Knowledge Content">
+                        👁️ View
+                      </button>
+                      <button class="btn-delete btn-delete-source" data-id="{{ item.id }}" data-name="{{ item.source }}">
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="6" style="text-align: center; color: #64748b; padding: 24px;">
+                  No training history found. Start by clicking <strong>Scrape Now</strong> or uploading documents above.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- Document Viewer Modal (PDF / Documents) -->
+  <div id="doc-viewer-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(8px);">
+    <div style="background: #111a2e; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; width: 92%; max-width: 960px; height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px rgba(0,0,0,0.7);">
+      <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); background: #0c1424;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">📄</span>
+          <h3 id="doc-modal-title" style="font-size: 15px; font-weight: 600; color: #fff;">Document Viewer</h3>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <a id="doc-modal-external-link" href="#" target="_blank" class="btn-secondary" style="padding: 6px 12px; font-size: 12px;">
+            ↗ Open in New Tab
+          </a>
+          <button id="btn-close-doc-modal" style="background: none; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; padding: 4px 8px;">✕</button>
+        </div>
+      </div>
+      <div style="flex: 1; background: #070d1e; position: relative; overflow: hidden;">
+        <iframe id="doc-viewer-iframe" style="width: 100%; height: 100%; border: none;" src=""></iframe>
+        <div id="doc-viewer-text-container" style="display: none; width: 100%; height: 100%; overflow-y: auto; padding: 28px 32px; box-sizing: border-box; color: #f1f5f9; font-family: var(--font-main); line-height: 1.7;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings / Gemini API Key Modal -->
+  <div id="settings-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 999; align-items: center; justify-content: center; backdrop-filter: blur(6px);">
+    <div style="background: #111a2e; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; width: 90%; max-width: 520px; padding: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="font-size: 18px; font-weight: 700;">⚙️ Gemini API Configuration</h3>
+        <button id="btn-close-settings" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;">✕</button>
+      </div>
+      <p style="font-size: 13px; color: #94a3b8; margin-bottom: 16px;">
+        Configure your Google Gemini API key. Stored securely in <code>.env</code> on the server and never exposed to the frontend.
+      </p>
+      <div class="form-group">
+        <label class="form-label" for="gemini-api-key-input">Gemini API Key</label>
+        <input type="password" id="gemini-api-key-input" class="form-input" placeholder="AIzaSy...">
+      </div>
+      <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
+        <button onclick="document.getElementById('settings-modal').style.display='none'" class="btn-secondary">Cancel</button>
+        <button id="btn-save-key" class="btn-primary">Save & Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/admin.js"></script>
+</body>
+</html>

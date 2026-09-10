@@ -1,0 +1,140 @@
+# Render blueprint - works on BOTH the free and paid tiers.
+#
+# Two fields are deliberately NOT declared here:
+#
+#   plan   Omitted so Render "retains the current compute plan for an existing
+#          service". You pick free or a paid plan in the dashboard and it
+#          survives every future blueprint sync. If it were declared, a sync
+#          would overwrite whatever you set in the dashboard.
+#          Note: a brand-new service defaults to 0.5c-512mb (paid). Switch it
+#          to Free right after creation if you want to test at no cost.
+#
+#   disk   Omitted because free instances cannot mount a persistent disk, and a
+#          declared disk would make the blueprint invalid on the free tier.
+#          Add it in the dashboard once you are on a paid plan:
+#              Disks -> Add Disk
+#              Name       bmsit-data
+#              Mount path /opt/render/project/src/data
+#              Size       2 GB
+#          Without a disk, data/ is ephemeral: vectors, page text and the delta
+#          registry are wiped on every restart and you re-scrape. That is fine
+#          for testing and unacceptable for production.
+#
+# The env values below are chosen to run on a 512 MB free instance. After
+# upgrading, raise these four in the dashboard for the full site:
+#   SCRAPE_MAX_PAGES          3000
+#   SCRAPE_DEPTH              5
+#   EMBED_DAILY_TOKEN_BUDGET  800000   (or 0 for unlimited on a paid API key)
+#   EMBED_MAX_CHUNKS_PER_RUN  0        (unlimited)
+
+services:
+  - type: web
+    name: bmsit-ai-agent
+    runtime: python
+    region: singapore
+    branch: main
+
+    buildCommand: pip install -r requirements.txt
+
+    # One worker is mandatory, not a tuning choice: the FAISS index lives in
+    # process memory and the daily scheduler runs inside this process. A second
+    # worker would hold a diverging copy of the index and duplicate the crawl.
+    # --timeout 600 because a manual "Scrape Now" runs inside the request.
+    startCommand: gunicorn run:app --bind 0.0.0.0:$PORT --workers 1 --threads 4 --timeout 600
+
+    healthCheckPath: /health
+
+    envVars:
+      # --- secrets: prompted once at blueprint creation, never stored in git ---
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_API_KEYS
+        sync: false
+      - key: SECRET_KEY
+        generateValue: true
+
+      # --- token strategy ---
+      - key: EMBED_CACHE_ENABLED
+        value: "true"
+      - key: EMBED_CACHE_MAX_VECTORS
+        value: "200000"
+      - key: EMBED_DAILY_TOKEN_BUDGET
+        value: "400000"
+      - key: EMBED_MAX_CHUNKS_PER_RUN
+        value: "600"
+      - key: SCRAPE_MIN_PAGE_TOKENS
+        value: "80"
+
+      # --- chunking ---
+      - key: CHUNK_TARGET_TOKENS
+        value: "450"
+      - key: CHUNK_MAX_TOKENS
+        value: "550"
+      - key: CHUNK_MIN_TOKENS
+        value: "60"
+      - key: CHUNK_OVERLAP_TOKENS
+        value: "30"
+
+      # --- embeddings ---
+      - key: EMBED_MODEL
+        value: gemini-embedding-001
+      - key: EMBEDDING_DIM
+        value: "768"
+      - key: EMBED_MAX_BATCH_TEXTS
+        value: "100"
+      - key: EMBED_MAX_BATCH_TOKENS
+        value: "20000"
+      - key: EMBED_MAX_INPUT_TOKENS
+        value: "2048"
+      # Low concurrency keeps peak memory inside 512 MB.
+      - key: EMBED_MAX_CONCURRENCY
+        value: "2"
+      - key: EMBED_TIMEOUT
+        value: "60"
+      - key: EMBED_RETRIES
+        value: "2"
+      - key: EMBED_MIN_INTERVAL
+        value: "0.5"
+      - key: EMBED_KEY_COOLDOWN
+        value: "3600"
+      - key: EMBED_COMMIT_SLICE_CHUNKS
+        value: "150"
+
+      # --- crawler ---
+      - key: BMSIT_DEFAULT_URL
+        value: https://bmsit.ac.in/
+      - key: SCRAPE_DEPTH
+        value: "4"
+      - key: SCRAPE_MAX_PAGES
+        value: "800"
+      - key: SCRAPE_BOILERPLATE_RATIO
+        value: "0.30"
+      - key: SCRAPE_REQUEST_TIMEOUT
+        value: "10"
+      - key: SCRAPE_DELAY
+        value: "0.12"
+
+      # --- daily delta run (needs a non-sleeping instance to fire reliably) ---
+      - key: SCHEDULE_TIME
+        value: "07:00"
+      - key: SCHEDULE_TIMEZONE
+        value: Asia/Kolkata
+
+      # --- retrieval / chat ---
+      - key: TOP_K
+        value: "8"
+      - key: CHAT_TIMEOUT
+        value: "45"
+      - key: CHAT_MODELS
+        value: gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.8-flash
+
+      # --- server ---
+      # Render routes external traffic into the container, so bind to 0.0.0.0.
+      - key: HOST
+        value: 0.0.0.0
+      - key: DEBUG
+        value: "false"
+      - key: LOG_LEVEL
+        value: INFO
+      - key: PYTHON_VERSION
+        value: 3.13.7

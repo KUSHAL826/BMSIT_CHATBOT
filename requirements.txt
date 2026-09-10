@@ -1,0 +1,23 @@
+# Web layer
+flask==3.1.0
+# Production WSGI server (used by Render; not needed for local `python run.py`)
+gunicorn==23.0.0
+
+# Scraping
+beautifulsoup4==4.13.3
+requests==2.32.3
+
+# Document parsing
+pypdf==5.3.0
+python-docx==1.1.2
+olefile==0.47
+
+# Vector search
+faiss-cpu==1.10.0
+numpy==2.2.3
+
+# Scheduling
+APScheduler==3.11.0
+
+# Config
+python-dotenv==1.0.1
