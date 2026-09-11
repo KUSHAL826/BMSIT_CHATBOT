@@ -92,6 +92,14 @@ _SPEC = {
     "TOP_K": ("int", 8),
     "CHAT_TIMEOUT": ("int", 45),
     "CHAT_MODELS": ("list", "gemini-3.5-flash-lite,gemini-3.6-flash,gemini-3.8-flash"),
+
+    # Supabase Vector Store
+    "SUPABASE_URL": ("str", ""),
+    "SUPABASE_KEY": ("str", ""),
+    "SUPABASE_SERVICE_ROLE_KEY": ("str", ""),
+    "SUPABASE_ANON_KEY": ("str", ""),
+    "SUPABASE_TABLE": ("str", "vectors"),
+    "SUPABASE_DB_URL": ("str", ""),
 }
 
 _MISSING = []    # required, absent from both sources
@@ -244,6 +252,19 @@ class Config:
     TOP_K = _get("TOP_K")
     CHAT_TIMEOUT = _get("CHAT_TIMEOUT")
     CHAT_MODELS = _get("CHAT_MODELS")
+
+    # ------------------------------------------------------------------
+    # Supabase Vector Store
+    # ------------------------------------------------------------------
+    SUPABASE_URL = _get("SUPABASE_URL")
+    SUPABASE_KEY = _get("SUPABASE_KEY") or _get("SUPABASE_SERVICE_ROLE_KEY") or _get("SUPABASE_ANON_KEY") or ""
+    SUPABASE_TABLE = _get("SUPABASE_TABLE") or "vectors"
+    SUPABASE_DB_URL = _get("SUPABASE_DB_URL")
+
+    @classmethod
+    def is_supabase_enabled(cls):
+        """Returns True if Supabase credentials or DB URL are present."""
+        return bool((cls.SUPABASE_URL and cls.SUPABASE_KEY) or cls.SUPABASE_DB_URL)
 
     # ------------------------------------------------------------------
     # Validation

@@ -5,7 +5,7 @@ A retrieval-augmented assistant for **B.M.S. Institute of Technology and Managem
 copy of every page it has seen, and answers questions only from that verified
 content, with citations.
 
-Flask + FAISS + the Gemini API. No database, no build step.
+Flask + Supabase (PostgreSQL + pgvector) / FAISS + Gemini API.
 
 ---
 
@@ -126,16 +126,73 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
-Edit `.env` and add your keys:
+Edit `.env` and add your keys and Supabase credentials:
 
 ```env
+# Gemini API keys
 GEMINI_API_KEY=your_key_for_chat
 GEMINI_API_KEYS=key1,key2,key3
+
+# Supabase Vector Store (pgvector)
+SUPABASE_URL=https://your-project-id.supabase.co
+SUPABASE_KEY=your_supabase_anon_or_service_role_key
+SUPABASE_TABLE=vectors
 ```
 
-Get keys from [Google AI Studio](https://aistudio.google.com/apikey).
+Get Gemini keys from [Google AI Studio](https://aistudio.google.com/apikey).
 
-Run it:
+---
+
+## Setting up Supabase Vector Store (PostgreSQL + pgvector)
+
+### Difference between `.env` and Environment Variables:
+- **`.env` file**: A local text file in the root directory used during local development.
+- **Process Environment Variables**: Variables set in your operating system or cloud host (e.g. Render Dashboard -> Environment Variables). Environment variables take priority over `.env`.
+
+### Step-by-Step Database Setup:
+
+1. **Create a Supabase Project**:
+   Sign in to [Supabase](https://supabase.com) and create a new project.
+
+2. **Run the Database Setup Script**:
+   Go to your Supabase Dashboard -> **SQL Editor** -> **New Query**, paste the following SQL script, and click **Run**:
+
+   ```sql
+   -- 1. Enable pgvector extension
+   CREATE EXTENSION IF NOT EXISTS vector;
+
+   -- 2. Create vectors table
+   CREATE TABLE IF NOT EXISTS vectors (
+       id TEXT PRIMARY KEY,
+       source_id TEXT,
+       source_name TEXT,
+       source_type TEXT,
+       item_key TEXT,
+       text TEXT NOT NULL,
+       tokens INT DEFAULT 0,
+       context_header TEXT,
+       metadata JSONB DEFAULT '{}'::jsonb,
+       embed_provider TEXT,
+       content_hash TEXT,
+       embedding vector(768),
+       created_at TIMESTAMPTZ DEFAULT NOW(),
+       updated_at TIMESTAMPTZ DEFAULT NOW()
+   );
+
+   -- 3. Create index for fast vector similarity search
+   CREATE INDEX IF NOT EXISTS vectors_embedding_idx ON vectors 
+   USING ivfflat (embedding vector_ip_ops) WITH (lists = 100);
+   ```
+
+3. **Get Your Credentials**:
+   In your Supabase Dashboard, go to **Project Settings** -> **API**:
+   - Copy **Project URL** -> `SUPABASE_URL`
+   - Copy **anon / public** or **service_role** key -> `SUPABASE_KEY`
+
+4. **Configure `.env`**:
+   Add `SUPABASE_URL` and `SUPABASE_KEY` to `.env` (or set them as environment variables on host platforms like Render).
+
+5. **Run it**:
 
 ```cmd
 .venv\Scripts\python.exe run.py

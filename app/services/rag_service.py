@@ -27,6 +27,7 @@ from app.config import Config
 from app.services.chunker import count_tokens, split_into_token_chunks
 from app.services.embedding_service import LOCAL_PROVIDER_ID, EmbeddingService
 from app.services.fsutil import atomic_write_bytes, atomic_write_json, read_json
+from app.services.supabase_service import SupabaseService
 
 logger = logging.getLogger(__name__)
 
@@ -79,25 +80,45 @@ class RAGService:
 
     def initialize(self):
         Config.ensure_directories()
+        supabase = SupabaseService.get_instance()
         with self._lock:
-            chunks = read_json(self._chunks_file, default=[])
-            if not isinstance(chunks, list):
-                chunks = []
-
+            chunks = []
             embeddings = np.zeros((0, self._dim), dtype=np.float32)
-            if self._emb_file.exists():
-                try:
-                    loaded = np.load(str(self._emb_file))
-                    if loaded.ndim == 2 and loaded.shape[1] == self._dim:
-                        embeddings = loaded.astype(np.float32)
-                    else:
-                        logger.error(
-                            "[RAG] embeddings.npy is %s but EMBEDDING_DIM is %s. Vectors "
-                            "discarded; content will be re-embedded.", loaded.shape, self._dim,
-                        )
-                        chunks = []
-                except Exception as e:
-                    logger.error("[RAG] Could not read embeddings.npy: %s", e)
+            loaded_from_supabase = False
+
+            if supabase.is_enabled:
+                logger.info("[RAG] Supabase is enabled. Loading existing vectors from Supabase PostgreSQL...")
+                sp_chunks, sp_embeddings = supabase.fetch_all_chunks()
+                if sp_chunks and len(sp_chunks) == len(sp_embeddings):
+                    chunks = sp_chunks
+                    embeddings = sp_embeddings
+                    loaded_from_supabase = True
+                    logger.info("[RAG] Successfully loaded %s chunk(s) from Supabase PostgreSQL.", len(chunks))
+
+            # Fallback to local files if Supabase is disabled or empty
+            if not loaded_from_supabase:
+                chunks = read_json(self._chunks_file, default=[])
+                if not isinstance(chunks, list):
+                    chunks = []
+
+                if self._emb_file.exists():
+                    try:
+                        loaded = np.load(str(self._emb_file))
+                        if loaded.ndim == 2 and loaded.shape[1] == self._dim:
+                            embeddings = loaded.astype(np.float32)
+                        else:
+                            logger.error(
+                                "[RAG] embeddings.npy is %s but EMBEDDING_DIM is %s. Vectors "
+                                "discarded; content will be re-embedded.", loaded.shape, self._dim,
+                            )
+                            chunks = []
+                    except Exception as e:
+                        logger.error("[RAG] Could not read embeddings.npy: %s", e)
+
+                # If local data exists and Supabase is enabled but empty, backfill local data to Supabase
+                if supabase.is_enabled and chunks and len(chunks) == len(embeddings):
+                    logger.info("[RAG] Backfilling %s local chunk(s) to empty Supabase vector store...", len(chunks))
+                    supabase.insert_chunks(chunks, embeddings)
 
             repaired = False
             if len(chunks) != len(embeddings):
@@ -120,12 +141,12 @@ class RAGService:
             self._chunks = chunks
             self._embeddings = embeddings
             self._rebuild_spaces()
-            if repaired:
+            if repaired or loaded_from_supabase:
                 self._persist()
 
             logger.info(
-                "[RAG] Loaded %s chunks. Spaces: %s",
-                len(self._chunks), {p: len(v[1]) for p, v in self._spaces.items()},
+                "[RAG] Loaded %s chunks (Supabase: %s). Spaces: %s",
+                len(self._chunks), loaded_from_supabase, {p: len(v[1]) for p, v in self._spaces.items()},
             )
 
     def _rebuild_spaces(self):
@@ -340,16 +361,28 @@ class RAGService:
     # ------------------------------------------------------------------
     # Ingestion
     # ------------------------------------------------------------------
+    # ------------------------------------------------------------------
+    # Ingestion
+    # ------------------------------------------------------------------
     def index_chunks(self, new_chunks, progress_callback=None):
-        """Embeds and appends chunks."""
+        """Embeds and appends chunks to Supabase and memory."""
         if not new_chunks:
             return 0
         source_id = new_chunks[0].get("source_id")
         new_chunks, _ = self.dedupe_chunks(source_id, new_chunks)
+        
+        # Filter out chunks that already exist in memory (prevent duplicates)
+        existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
+        new_chunks = [c for c in new_chunks if c.get("chunk_id") not in existing_ids]
+
         if not new_chunks:
             return 0
 
         prepared, vectors = self._prepare(new_chunks, progress_callback)
+        supabase = SupabaseService.get_instance()
+        if supabase.is_enabled:
+            supabase.insert_chunks(prepared, vectors)
+
         with self._lock:
             self._append(prepared, vectors)
             self._rebuild_spaces()
@@ -359,41 +392,51 @@ class RAGService:
     def apply_source_update(self, source_id, new_chunks, replace_keys=None, replace_all=False,
                             stale_chunk_ids=None, progress_callback=None):
         """
-        Atomically replaces part of a source.
+        Appends new embeddings/chunks for a source without deleting existing chunks.
 
-        Order matters: new vectors are produced first, and only then are the stale
-        ones dropped and the new ones swapped in. `stale_chunk_ids` comes from the
-        ingestion registry so deletion targets exactly the vectors that URL owns.
-        Items not listed are left untouched.
+        When new/changed pages are scraped, add their new embeddings/chunks to the
+        existing Supabase vector store — never delete or replace previous chunks.
+        Reuse existing chunks when the content hash is unchanged and prevent duplicates.
         """
+        supabase = SupabaseService.get_instance()
+        
+        # Prevent duplicates: skip chunks whose chunk_id or exact text already exists
+        existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
+        existing_digests = {self._dedupe_key(c) for c in self._chunks}
+
+        filtered_chunks = []
+        if new_chunks:
+            deduped_chunks, _ = self.dedupe_chunks(source_id, new_chunks, replace_keys, replace_all)
+            for chunk in deduped_chunks:
+                cid = chunk.get("chunk_id")
+                digest = self._dedupe_key(chunk)
+                if cid in existing_ids or digest in existing_digests:
+                    continue
+                filtered_chunks.append(chunk)
+
         prepared, vectors = [], np.zeros((0, self._dim), dtype=np.float32)
-        if new_chunks:
-            new_chunks, _ = self.dedupe_chunks(source_id, new_chunks, replace_keys, replace_all)
-        if new_chunks:
-            prepared, vectors = self._prepare(new_chunks, progress_callback)
+        if filtered_chunks:
+            prepared, vectors = self._prepare(filtered_chunks, progress_callback)
 
-        keys_to_drop = set(replace_keys or [])
-        ids_to_drop = set(stale_chunk_ids or [])
+        removed = 0
+        # Requirement: When new/changed pages are scraped, add their new embeddings/chunks
+        # to the existing Supabase vector store — never delete or replace previous chunks.
+        if not supabase.is_enabled and not replace_all:
+            # Only in non-Supabase strict local mode with explicit replacement:
+            pass  # Keep previous chunks preserved in all cases as required
 
-        def is_stale(chunk):
-            if chunk.get("source_id") != source_id:
-                return False
-            if replace_all:
-                return True
-            if chunk.get("chunk_id") in ids_to_drop:
-                return True
-            return chunk.get("item_key") in keys_to_drop
+        if supabase.is_enabled and prepared:
+            supabase.insert_chunks(prepared, vectors)
 
         with self._lock:
-            removed = self._drop(is_stale)
             self._append(prepared, vectors)
             self._rebuild_spaces()
             self._persist()
             total = sum(1 for c in self._chunks if c.get("source_id") == source_id)
 
         logger.info(
-            "[RAG] %s: -%s chunk(s), +%s chunk(s), %s active.",
-            source_id, removed, len(prepared), total,
+            "[RAG] %s: -%s chunk(s), +%s chunk(s), %s active. (Supabase: %s)",
+            source_id, removed, len(prepared), total, supabase.is_enabled,
         )
         return {
             "removed": removed,
@@ -407,6 +450,10 @@ class RAGService:
     # ------------------------------------------------------------------
     def delete_source(self, source_id):
         """Removes every vector for one source. Other sources are untouched."""
+        supabase = SupabaseService.get_instance()
+        if supabase.is_enabled:
+            supabase.delete_source(source_id)
+
         with self._lock:
             removed = self._drop(lambda c: c.get("source_id") == source_id)
             if removed:
@@ -418,6 +465,10 @@ class RAGService:
 
     def reset_index(self):
         """Empties the vector store completely. Used by the admin reset."""
+        supabase = SupabaseService.get_instance()
+        if supabase.is_enabled:
+            supabase.reset_table()
+
         with self._lock:
             removed = len(self._chunks)
             self._chunks = []
