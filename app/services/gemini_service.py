@@ -376,27 +376,15 @@ ANSWER (Provide a direct, accurate, and helpful response based on the BMSIT cont
         if not chunks:
             return unknown_message
 
-        def summarize_top_chunk():
-            """
-            Last resort before giving up: the retriever did find relevant
-            material, so surface it instead of claiming nothing is known.
-            """
-            top = chunks[0]
-            text = re.sub(r"^(Page Title:.*|URL:.*|Content:)\s*$", "", top.get("text", ""),
-                          flags=re.MULTILINE).strip()
-            lines = [ln.strip() for ln in re.split(r"(?<=[.!?])\s+|\n+", text) if len(ln.strip()) > 25]
-            if not lines:
-                return unknown_message
-            excerpt = " ".join(lines[:3])[:700]
-            return (
-                f"Here is what the BMSIT knowledge base holds on this topic:\n\n{excerpt}\n\n"
-                f"> *Source: {top.get('source_name', 'BMSIT Records')}*\n\n"
-                "If you need an exact or official confirmation, please contact the college at "
-                "`admissions@bmsit.in` or +91-80-68730444."
-            )
-
         # Tokenize query into meaningful topic search terms and stems
-        stop_words = {"what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on", "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit", "bms", "college", "institute", "campus", "info", "information", "him", "her", "his", "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that"}
+        stop_words = {
+            "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
+            "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit",
+            "bms", "college", "institute", "campus", "info", "information", "him", "her", "his",
+            "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
+            "dept", "department", "belongs", "name", "who", "give", "list"
+        }
+        
         raw_words = [w.lower() for w in re.findall(r'\w+', query) if w.lower() not in stop_words and len(w) > 2]
         stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss')) else w for w in raw_words]
 
@@ -407,7 +395,20 @@ ANSWER (Provide a direct, accurate, and helpful response based on the BMSIT cont
             stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss')) else w for w in raw_words]
 
         if not stems:
-            return summarize_top_chunk()
+            return unknown_message
+
+        # Verify specific subject terms (e.g. proper names like "bhavya") exist in the retrieved context
+        specific_terms = [w for w in raw_words if len(w) > 3 and w not in ["faculty", "professor", "teacher", "head", "chair"]]
+        if specific_terms:
+            has_specific_match = False
+            for c in chunks:
+                chunk_text_lower = c.get("text", "").lower()
+                if any(term in chunk_text_lower for term in specific_terms):
+                    has_specific_match = True
+                    break
+            if not has_specific_match:
+                logger.info(f"[Gemini Fallback] Specific terms {specific_terms} not found in retrieved chunks. Returning unknown message.")
+                return unknown_message
 
         # Extract sentences across chunks that match topic stems
         candidate_lines = []
@@ -422,7 +423,7 @@ ANSWER (Provide a direct, accurate, and helpful response based on the BMSIT cont
                     candidate_lines.append((matches, sentence, c.get("source_name", "BMSIT Records")))
 
         if not candidate_lines:
-            return summarize_top_chunk()
+            return unknown_message
 
         # Sort by relevance (highest matches first)
         candidate_lines.sort(key=lambda x: x[0], reverse=True)
@@ -442,7 +443,7 @@ ANSWER (Provide a direct, accurate, and helpful response based on the BMSIT cont
                 break
 
         if not best_lines:
-            return summarize_top_chunk()
+            return unknown_message
 
         primary_source = candidate_lines[0][2]
         exact_answer = "\n\n".join(best_lines)
