@@ -7,7 +7,7 @@
 (function () {
   "use strict";
 
-  var MAX_HISTORY_TURNS = 8;
+  var MAX_HISTORY_TURNS = 10;
 
   var conversation = document.getElementById("conversation");
   var welcome = document.getElementById("welcome");
@@ -244,7 +244,7 @@
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ message: text, history: history.slice(-MAX_HISTORY_TURNS) })
+      body: JSON.stringify({ message: text, history: history.slice(-MAX_HISTORY_TURNS * 2) })
     })
       .then(function (response) {
         return response.json().catch(function () {

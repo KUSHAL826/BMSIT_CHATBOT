@@ -176,5 +176,24 @@ The campus is equipped with 24/7 CCTV surveillance and medical health center."""
         deleted = StorageService.delete_history_entry(entry["id"])
         self.assertEqual(deleted["id"], entry["id"])
 
+    def test_05_conversational_context_followup(self):
+        """Test in-memory session contextualization for pronouns (e.g. 'tell about him')."""
+        history = [
+            {"role": "user", "text": "what is name of principal of college"},
+            {"role": "assistant", "text": "The Principal of BMSIT is Dr. Mohan Babu."}
+        ]
+
+        # 1. Test query rewriting
+        query = "tell about him"
+        contextualized = GeminiService._contextualize_query(query, history)
+        self.assertIn("tell about him", contextualized)
+        self.assertIn("principal", contextualized.lower())
+
+        # 2. Test chat response generation with history
+        res = GeminiService.generate_chat_response(query, conversation_history=history)
+        self.assertIn("reply", res)
+        self.assertFalse(res["guardrail_triggered"])
+
 if __name__ == "__main__":
     unittest.main()
+

@@ -66,6 +66,50 @@ class GeminiService:
         "application", "department", "event", "fest", "utsaha"
     ]
 
+    PRONOUN_PATTERNS = [
+        r"\b(him|his|he|her|hers|she|it|its|they|them|their|this|that|these|those)\b",
+        r"\b(who is he|who is she|tell about him|tell about her|tell me more|what about him|what about her|details about him|details about her)\b",
+        r"\b(tell more|more info|more details|explain more|who is that)\b"
+    ]
+
+    @classmethod
+    def _contextualize_query(cls, user_message, conversation_history=None):
+        """
+        If the user message uses pronouns or is a short follow-up query,
+        extract key subject terms from previous turns to produce an enriched query for RAG retrieval.
+        All context processing is done in-memory without database storage.
+        """
+        if not conversation_history:
+            return user_message
+
+        msg_lower = user_message.lower().strip()
+        words = re.findall(r"\w+", msg_lower)
+        
+        has_pronoun = any(re.search(pat, msg_lower) for pat in cls.PRONOUN_PATTERNS)
+        is_short_followup = len(words) <= 6 and any(
+            w in ["more", "details", "info", "about", "tell", "what", "who", "where", "how", "his", "her", "him", "this", "that"]
+            for w in words
+        )
+
+        if not (has_pronoun or is_short_followup):
+            return user_message
+
+        context_snippets = []
+        for turn in reversed(conversation_history):
+            text = turn.get("text") or turn.get("content") or ""
+            if text:
+                clean_text = re.sub(r"[\*\_`#]|https?://\S+", "", text).strip()
+                if clean_text:
+                    context_snippets.append(clean_text)
+
+        if not context_snippets:
+            return user_message
+
+        history_context = " ".join(context_snippets[:6])
+        enriched_query = f"{user_message} (Context: {history_context[:500]})"
+        logger.info(f"[Gemini] Contextualized query: '{user_message}' -> '{enriched_query}'")
+        return enriched_query
+
     @classmethod
     def check_guardrails(cls, message):
         """
@@ -160,9 +204,12 @@ class GeminiService:
                 "guardrail_triggered": False
             }
 
+        # Contextualize query for RAG retrieval if session history is present
+        search_query = cls._contextualize_query(user_message, conversation_history)
+
         # RAG Retrieval
         rag = RAGService.get_instance()
-        retrieved_chunks = rag.retrieve(user_message, top_k=Config.TOP_K)
+        retrieved_chunks = rag.retrieve(search_query, top_k=Config.TOP_K)
 
         if not retrieved_chunks:
             stats = rag.get_stats()
@@ -229,7 +276,7 @@ class GeminiService:
                 logger.error(f"[Gemini] API Call failed: {e}. Using knowledge synthesis fallback.")
 
         # Fallback knowledge synthesis
-        reply = cls._synthesize_from_context(user_message, retrieved_chunks)
+        reply = cls._synthesize_from_context(user_message, retrieved_chunks, conversation_history)
         return {
             "reply": reply,
             "sources": sources,
@@ -241,9 +288,20 @@ class GeminiService:
         """Calls Google Gemini API using direct REST endpoints with model failover."""
         import requests
 
+        history_block = ""
+        if history:
+            formatted_turns = []
+            for turn in history[-16:]:
+                role = "User" if turn.get("role") == "user" else "Assistant"
+                text = turn.get("text") or turn.get("content") or ""
+                if text:
+                    formatted_turns.append(f"{role}: {text.strip()}")
+            if formatted_turns:
+                history_block = "CONVERSATION HISTORY (Current Active Session):\n" + "\n".join(formatted_turns) + "\n\n"
+
         prompt = f"""{SYSTEM_PROMPT}
 
-KNOWLEDGE BASE CONTEXT (From BMSIT official website and verified college records):
+{history_block}KNOWLEDGE BASE CONTEXT (From BMSIT official website and verified college records):
 {context}
 
 USER QUESTION:
@@ -300,7 +358,7 @@ ANSWER (Provide a direct, accurate, and helpful response based on the BMSIT cont
         raise last_err or RuntimeError("No Gemini models succeeded")
 
     @classmethod
-    def _synthesize_from_context(cls, query, chunks):
+    def _synthesize_from_context(cls, query, chunks, conversation_history=None):
         """
         Intelligent local synthesis when API key is not configured or in offline demo mode.
         Extracts verified answers from retrieved context matching the question topic.
@@ -338,9 +396,15 @@ ANSWER (Provide a direct, accurate, and helpful response based on the BMSIT cont
             )
 
         # Tokenize query into meaningful topic search terms and stems
-        stop_words = {"what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on", "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit", "bms", "college", "institute", "campus", "info", "information"}
+        stop_words = {"what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on", "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit", "bms", "college", "institute", "campus", "info", "information", "him", "her", "his", "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that"}
         raw_words = [w.lower() for w in re.findall(r'\w+', query) if w.lower() not in stop_words and len(w) > 2]
         stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss')) else w for w in raw_words]
+
+        if not stems and conversation_history:
+            # Fallback to stems from conversation history if query only has pronouns
+            hist_text = " ".join([t.get("text", "") or t.get("content", "") for t in conversation_history[-4:]])
+            raw_words = [w.lower() for w in re.findall(r'\w+', hist_text) if w.lower() not in stop_words and len(w) > 2]
+            stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss')) else w for w in raw_words]
 
         if not stems:
             return summarize_top_chunk()
@@ -386,4 +450,5 @@ ANSWER (Provide a direct, accurate, and helpful response based on the BMSIT cont
             f"{exact_answer}\n\n"
             f"> *Source: {primary_source}*"
         )
+
 
