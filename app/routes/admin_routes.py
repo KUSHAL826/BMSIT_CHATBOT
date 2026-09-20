@@ -429,44 +429,37 @@ def _build_supabase_history():
 
 def _get_persistent_history():
     """
-    Returns local history first.
-
-    If local history is empty after a Render restart/redeploy,
-    reconstructs history from Supabase.
+    Merges local training history with persistent Supabase sources,
+    ensuring all active trained documents and web scrapes stay visible.
     """
-
     try:
-
-        local_history = (
-            StorageService.load_history()
-        )
-
-        if local_history:
-            return local_history
-
+        local_history = StorageService.load_history() or []
     except Exception as e:
-
-        print(
-            "[Admin] Local history could not "
-            f"be loaded: {e}"
-        )
-
+        print(f"[Admin] Local history load error: {e}")
         local_history = []
 
-    persistent_history = (
-        _build_supabase_history()
-    )
+    try:
+        persistent_history = _build_supabase_history() or []
+    except Exception as e:
+        print(f"[Admin] Persistent Supabase history load error: {e}")
+        persistent_history = []
 
-    if persistent_history:
+    seen_keys = set()
+    combined = []
 
-        print(
-            f"[Admin] Restored "
-            f"{len(persistent_history)} "
-            "training source(s) from "
-            "persistent Supabase vectors."
-        )
+    for item in local_history:
+        key = str(item.get("source") or item.get("id") or "").strip().lower()
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            combined.append(item)
 
-    return persistent_history
+    for item in persistent_history:
+        key = str(item.get("source") or item.get("id") or "").strip().lower()
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            combined.append(item)
+
+    return combined
 
 
 # ============================================================
