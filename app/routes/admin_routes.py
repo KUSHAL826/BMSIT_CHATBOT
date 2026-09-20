@@ -12,7 +12,8 @@ from flask import (
     jsonify,
     redirect,
     url_for,
-    send_from_directory
+    send_from_directory,
+    session
 )
 from werkzeug.utils import secure_filename
 
@@ -543,15 +544,49 @@ def _get_supabase_source_chunks(source_id):
 
 
 # ============================================================
+# SECURITY & AUTHENTICATION MIDDLEWARE
+# ============================================================
+
+@admin_bp.before_request
+def require_admin_auth():
+    """Enforces password authentication on all admin pages and API endpoints."""
+    if request.path in ("/admin/login", "/admin/logout"):
+        return None
+
+    if Config.ADMIN_PASSWORD:
+        if not session.get("admin_authenticated"):
+            if request.path.startswith("/api/admin"):
+                return jsonify({"error": "Unauthorized. Admin authentication required."}), 401
+            return redirect(url_for("admin.login_page"))
+
+
+@admin_bp.route("/admin/login", methods=["GET", "POST"])
+def login_page():
+    if request.method == "POST":
+        password = (request.form.get("password") or "").strip()
+        if password == Config.ADMIN_PASSWORD:
+            session["admin_authenticated"] = True
+            return redirect("/admin")
+        return render_template("admin_login.html", error="Invalid admin security password.")
+
+    if session.get("admin_authenticated"):
+        return redirect("/admin")
+    return render_template("admin_login.html")
+
+
+@admin_bp.route("/admin/logout")
+def logout():
+    session.pop("admin_authenticated", None)
+    return redirect(url_for("admin.login_page"))
+
+
+# ============================================================
 # ORIGINAL ADMIN ROUTES
 # ============================================================
 
 @admin_bp.route("/")
 def index():
-
-    return redirect(
-        "/admin"
-    )
+    return redirect("/admin")
 
 
 @admin_bp.route("/admin")

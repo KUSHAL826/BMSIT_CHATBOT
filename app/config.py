@@ -47,10 +47,8 @@ _SPEC = {
     "PORT": ("int", 5000),
     "DEBUG": ("bool", False),
     "LOG_LEVEL": ("str", "INFO"),
-    # Empty means "generate one at startup". Flask uses it only to sign session
-    # cookies and flash messages; this app has no login, so a per-process value
-    # is harmless. A warning is emitted so it is never a silent surprise.
     "SECRET_KEY": ("str", ""),
+    "ADMIN_PASSWORD": ("str", "admin123"),
 
     # Crawler
     "BMSIT_DEFAULT_URL": ("str", "https://bmsit.ac.in/"),
@@ -201,6 +199,7 @@ class Config:
     DEBUG = _get("DEBUG")
     LOG_LEVEL = _get("LOG_LEVEL")
     SECRET_KEY = _get("SECRET_KEY") or _generated_secret_key()
+    ADMIN_PASSWORD = _get("ADMIN_PASSWORD")
 
     # ------------------------------------------------------------------
     # Crawler
