@@ -98,12 +98,18 @@ class WebsiteScraper:
             full_u = urljoin(self.base_url, p).rstrip("/")
             if (full_u, 0) not in queue:
                 queue.append((full_u, 0))
-        scraped_pages = {}
-        detected_changes = []
 
-        # Load previous state for change detection
+        # Load previous state for change detection and seed existing pages
         previous_state = StorageService.load_scrape_state()
         old_pages = previous_state.get("pages", {})
+
+        # Ensure previously scraped URLs stay in the queue in consistent order
+        for old_u in old_pages:
+            if old_u and not any(q[0] == old_u for q in queue):
+                queue.append((old_u, 0))
+
+        scraped_pages = {}
+        detected_changes = []
 
         try:
             while queue and len(visited) < self.max_pages:
