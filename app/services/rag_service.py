@@ -617,14 +617,51 @@ class RAGService:
 
     # ------------------------------------------------------------------
     # Retrieval
-    # ------------------------------------------------------------------
+    ACRONYM_SYNONYMS = {
+        "hod": ["head", "associate head", "department head", "chair", "incharge", "lead"],
+        "cluster": ["division", "section", "department", "unit", "cluster", "batch", "group"],
+        "division": ["cluster", "section", "department", "unit", "batch"],
+        "section": ["cluster", "division", "batch"],
+        "dept": ["department", "division", "branch"],
+        "department": ["dept", "division", "branch"],
+        "cse": ["computer science", "engineering"],
+        "ise": ["information science", "engineering"],
+        "ece": ["electronics", "communication", "engineering"],
+        "eee": ["electrical", "electronics", "engineering"],
+        "mech": ["mechanical", "engineering"],
+        "cv": ["civil", "engineering"],
+        "civil": ["civil engineering"],
+        "ai": ["artificial intelligence"],
+        "ml": ["machine learning"],
+        "aiml": ["artificial intelligence", "machine learning"],
+        "aids": ["artificial intelligence", "data science"],
+        "principal": ["head of institution", "director"],
+        "fee": ["fees", "tuition", "payment", "cost", "charges"],
+        "fees": ["fee", "tuition", "payment", "cost", "charges"],
+        "hostel": ["accommodation", "dormitory", "residence"],
+        "placement": ["placements", "recruiters", "jobs", "hiring", "offers"],
+        "placements": ["placement", "recruiters", "jobs", "hiring", "offers"],
+        "prof": ["professor", "faculty", "doctor", "dr"],
+        "dr": ["doctor", "professor", "faculty"],
+    }
+
+    @classmethod
+    def _expand_synonyms(cls, query):
+        """Expands college acronyms and common terms with semantic synonyms."""
+        words = re.findall(r"\w+", (query or "").lower())
+        expansions = []
+        for word in words:
+            if word in cls.ACRONYM_SYNONYMS:
+                expansions.extend(cls.ACRONYM_SYNONYMS[word])
+        return " ".join(set(expansions))
+
     @staticmethod
     def _query_stems(query):
         words = [
             w.lower() for w in re.findall(r"\w+", query or "")
-            if w.lower() not in STOP_WORDS and len(w) > 2
+            if w.lower() not in STOP_WORDS and (len(w) > 2 or w.isdigit())
         ]
-        return [w[:-1] if (w.endswith("s") and not w.endswith("ss")) else w for w in words]
+        return [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in words]
 
     def _index_vocabulary(self):
         """
@@ -689,8 +726,9 @@ class RAGService:
 
     def retrieve(self, query, top_k=None):
         """
-        Hybrid retrieval: dense search inside each embedding space (never across
-        them), fused with a lexical sweep so exact topic matches cannot be missed.
+        FAISS Pure Dense Vector Semantic Search:
+        Embeds the query into dense vector space and searches FAISS index using vector similarity.
+        Works across all dimensions for any natural language input, including undefined words or phrasing.
         """
         with self._lock:
             if not self._chunks:
@@ -699,43 +737,51 @@ class RAGService:
             spaces = dict(self._spaces)
 
         k = top_k or Config.TOP_K
-        raw_stems = self._query_stems(query)
+        expanded_synonyms = self._expand_synonyms(query)
+        raw_stems = self._query_stems(f"{query} {expanded_synonyms}")
         stems, corrections = self.correct_terms(raw_stems)
-
-        # Embed the spelling-repaired query so dense search benefits too.
-        embed_query_text = query
-        if corrections:
-            repaired = query
-            for wrong, options in corrections.items():
-                repaired = re.sub(
-                    r"\b" + re.escape(wrong) + r"\w*", options[0], repaired, flags=re.IGNORECASE
-                )
-            embed_query_text = f"{query} ({repaired})"
 
         dense_scores = {}
 
         for provider, (index, positions) in spaces.items():
             if not positions or index.ntotal == 0 or provider == PROVIDER_LEGACY:
                 continue
-            query_vector = self._embedder.embed_query(embed_query_text, provider)
-            if query_vector is None or not len(query_vector):
-                continue
 
-            search_k = min(len(positions), max(k * 4, 30))
-            scores, ids = index.search(np.ascontiguousarray(query_vector), search_k)
-            hits = [
-                (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
-                if 0 <= i < len(positions)
-            ]
-            if not hits:
-                continue
+            # FAISS vector search with raw user query
+            query_vector = self._embedder.embed_query(query, provider)
+            if query_vector is not None and len(query_vector):
+                search_k = min(len(positions), max(k * 5, 40))
+                scores, ids = index.search(np.ascontiguousarray(query_vector), search_k)
+                hits = [
+                    (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
+                    if 0 <= i < len(positions)
+                ]
+                if hits:
+                    values = [s for _, s in hits]
+                    low, high = min(values), max(values)
+                    spread = (high - low) or 1.0
+                    for position, score in hits:
+                        normalized = (score - low) / spread if spread > 0 else score
+                        dense_scores[position] = max(dense_scores.get(position, 0.0), normalized)
 
-            values = [s for _, s in hits]
-            low, high = min(values), max(values)
-            spread = (high - low) or 1.0
-            for position, score in hits:
-                normalized = (score - low) / spread
-                dense_scores[position] = max(dense_scores.get(position, 0.0), normalized)
+            # Also embed synonym-enriched query to boost recall for domain terms
+            if expanded_synonyms:
+                enriched_text = f"{query} {expanded_synonyms}"
+                query_vector_enriched = self._embedder.embed_query(enriched_text, provider)
+                if query_vector_enriched is not None and len(query_vector_enriched):
+                    search_k = min(len(positions), max(k * 5, 40))
+                    scores, ids = index.search(np.ascontiguousarray(query_vector_enriched), search_k)
+                    hits = [
+                        (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
+                        if 0 <= i < len(positions)
+                    ]
+                    if hits:
+                        values = [s for _, s in hits]
+                        low, high = min(values), max(values)
+                        spread = (high - low) or 1.0
+                        for position, score in hits:
+                            normalized = (score - low) / spread if spread > 0 else score
+                            dense_scores[position] = max(dense_scores.get(position, 0.0), normalized)
 
         candidates = {}
 
@@ -750,7 +796,8 @@ class RAGService:
             title_hits = sum(1 for stem in stems if stem in title_lower)
 
             entry = dict(chunk)
-            entry["score"] = round(dense_score + keyword_hits * 0.35 + title_hits * 0.20, 4)
+            # FAISS dense vector similarity is the primary score
+            entry["score"] = round(dense_score + keyword_hits * 0.15 + title_hits * 0.10, 4)
             entry["kw_matches"] = keyword_hits
             entry["dense_score"] = round(dense_score, 4)
             current = candidates.get(position)
@@ -760,7 +807,8 @@ class RAGService:
         for position, score in dense_scores.items():
             consider(position, score)
 
-        if stems:
+        # Fallback lexical sweep if dense FAISS index is empty/sparse
+        if stems and len(candidates) < k:
             for position, chunk in enumerate(chunks):
                 if position in candidates:
                     continue
@@ -769,7 +817,7 @@ class RAGService:
                     1 for stem in stems if re.search(r"\b" + re.escape(stem), text_lower)
                 )
                 if keyword_hits >= 2 or (len(stems) == 1 and keyword_hits >= 1):
-                    consider(position, 0.15)
+                    consider(position, 0.10)
 
         ranked = sorted(candidates.values(), key=lambda c: c["score"], reverse=True)
 

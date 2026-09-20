@@ -381,20 +381,29 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based on the 
             "dept", "department", "belongs", "name", "who", "give", "list"
         }
         
-        raw_words = [w.lower() for w in re.findall(r'\w+', query) if w.lower() not in stop_words and len(w) > 2]
-        stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss')) else w for w in raw_words]
+        raw_words = [
+            w.lower() for w in re.findall(r'\w+', query)
+            if w.lower() not in stop_words and (len(w) > 2 or w.isdigit())
+        ]
+        stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss') and len(w) > 3) else w for w in raw_words]
 
         if not stems and conversation_history:
             # Fallback to stems from conversation history if query only has pronouns
             hist_text = " ".join([t.get("text", "") or t.get("content", "") for t in conversation_history[-4:]])
-            raw_words = [w.lower() for w in re.findall(r'\w+', hist_text) if w.lower() not in stop_words and len(w) > 2]
-            stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss')) else w for w in raw_words]
+            raw_words = [
+                w.lower() for w in re.findall(r'\w+', hist_text)
+                if w.lower() not in stop_words and (len(w) > 2 or w.isdigit())
+            ]
+            stems = [w[:-1] if (w.endswith('s') and not w.endswith('ss') and len(w) > 3) else w for w in raw_words]
 
         if not stems:
             return unknown_message
 
-        # Verify specific subject terms (e.g. proper names like "bhavya") exist in the retrieved context
-        specific_terms = [w for w in raw_words if len(w) > 3 and w not in ["faculty", "professor", "teacher", "head", "chair"]]
+        # Verify specific subject terms (e.g. proper names like "bhavya" or numbers like "4") exist in the retrieved context
+        specific_terms = [
+            w for w in raw_words
+            if (len(w) > 3 or w.isdigit()) and w not in ["faculty", "professor", "teacher", "head", "chair", "dept", "department", "cluster", "division", "section", "in", "of"]
+        ]
         if specific_terms:
             has_specific_match = False
             for c in chunks:
