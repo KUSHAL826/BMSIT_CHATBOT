@@ -24,6 +24,12 @@ class TestBMSITSystem(unittest.TestCase):
         cls.test_dir = Config.DATA_DIR / "test_scratch"
         cls.test_dir.mkdir(exist_ok=True)
 
+    @classmethod
+    def tearDownClass(cls):
+        import shutil
+        if hasattr(cls, "test_dir") and cls.test_dir.exists():
+            shutil.rmtree(cls.test_dir, ignore_errors=True)
+
     def test_01_document_parsers(self):
         """Test PDF, DOCX, and CSV document parsing."""
         # 1. Create test CSV
