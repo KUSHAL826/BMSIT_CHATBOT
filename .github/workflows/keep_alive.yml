@@ -1,0 +1,15 @@
+name: Keep Alive Render & Supabase
+
+on:
+  schedule:
+    - cron: '0 0 * * 1,4'
+  workflow_dispatch:
+
+jobs:
+  keep-alive:
+    name: Ping Render and Supabase
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Ping to Healthz Endpoint
+        run: |
+          curl -s -I -X GET "${{ secrets.RENDER_APP_URL }}/healthz"

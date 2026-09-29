@@ -17,6 +17,7 @@ def chatbot_page():
 
 
 @chat_bp.route("/health")
+@chat_bp.route("/healthz")
 def health():
     """Liveness plus a summary of what the knowledge base currently holds."""
     stats = RAGService.get_instance().get_stats()
