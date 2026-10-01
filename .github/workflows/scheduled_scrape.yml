@@ -18,8 +18,8 @@ jobs:
             exit 1
           fi
 
-          echo "Triggering BMSIT website delta scrape..."
-          RESPONSE=$(curl -sS -X POST "${{ secrets.RENDER_APP_URL }}/api/admin/scrape")
+          echo "Triggering BMSIT website delta scrape (allowing up to 120s for Render cold start)..."
+          RESPONSE=$(curl -sS --max-time 120 --retry 3 --retry-delay 5 -X POST "${{ secrets.RENDER_APP_URL }}/api/admin/scrape")
           echo "Response: $RESPONSE"
 
       - name: Keep Render Awake & Poll Until Scraping Completes
