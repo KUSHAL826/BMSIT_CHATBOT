@@ -1,0 +1,52 @@
+name: Scheduled BMSIT Web Scrape & Ingestion
+
+on:
+  schedule:
+    # Runs every Thursday at 10:52 AM IST (05:22 UTC)
+    - cron: '22 5 * * 4'
+  workflow_dispatch:
+
+jobs:
+  scrape-and-index:
+    name: Run Delta Web Scraper
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Scraper Endpoint
+        run: |
+          if [ -z "${{ secrets.RENDER_APP_URL }}" ]; then
+            echo "Error: RENDER_APP_URL secret is missing!"
+            exit 1
+          fi
+
+          echo "Triggering BMSIT website delta scrape..."
+          RESPONSE=$(curl -sS -X POST "${{ secrets.RENDER_APP_URL }}/api/admin/scrape")
+          echo "Response: $RESPONSE"
+
+      - name: Keep Render Awake & Poll Until Scraping Completes
+        run: |
+          echo "Monitoring scraper status and keeping Render awake..."
+          
+          # Wait 10 seconds before first check
+          sleep 10
+
+          MAX_CHECKS=60  # Poll up to 60 times (max ~30-60 mins)
+          CHECK_COUNT=0
+
+          while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
+            STATUS_JSON=$(curl -sS "${{ secrets.RENDER_APP_URL }}/api/admin/scrape/status")
+            echo "Scrape Status: $STATUS_JSON"
+
+            # Check if is_running is true
+            IS_RUNNING=$(echo "$STATUS_JSON" | grep -o '"is_running":\s*true' || true)
+
+            if [ -z "$IS_RUNNING" ]; then
+              echo "Scraping job completed successfully!"
+              exit 0
+            fi
+
+            CHECK_COUNT=$((CHECK_COUNT+1))
+            echo "Scraper still running... waiting 45 seconds (Check $CHECK_COUNT of $MAX_CHECKS)..."
+            sleep 45
+          done
+
+          echo "Warning: Polling timed out after 45 minutes."
