@@ -2,8 +2,8 @@ name: Keep Alive Render & Supabase
 
 on:
   schedule:
-    # 10:46 AM IST (UTC+5:30) is 05:16 UTC
-    - cron: '16 5 * * 1,4'
+    # 01:27 PM IST (UTC+5:30) is 07:57 UTC
+    - cron: '57 7 * * 1,4'
   workflow_dispatch:
 
 jobs:
