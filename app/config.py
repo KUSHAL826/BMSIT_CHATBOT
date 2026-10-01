@@ -81,10 +81,10 @@ _SPEC = {
     "EMBED_MIN_INTERVAL": ("float", 0.5),
     "EMBED_KEY_COOLDOWN": ("int", 3600),
     "EMBED_COMMIT_SLICE_CHUNKS": ("int", 150),
-    "EMBED_MAX_CHUNKS_PER_RUN": ("int", 600),
+    "EMBED_MAX_CHUNKS_PER_RUN": ("int", 0),
     "EMBED_CACHE_ENABLED": ("bool", True),
     "EMBED_CACHE_MAX_VECTORS": ("int", 200000),
-    "EMBED_DAILY_TOKEN_BUDGET": ("int", 400000),
+    "EMBED_DAILY_TOKEN_BUDGET": ("int", 0),
 
     # Retrieval / chat
     "TOP_K": ("int", 8),
