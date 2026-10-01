@@ -547,6 +547,12 @@ def require_admin_auth():
         return None
 
     if Config.ADMIN_PASSWORD:
+        # Support X-Admin-Key or Authorization Bearer header for automated cron triggers
+        auth_header = request.headers.get("X-Admin-Key") or request.headers.get("x-admin-key")
+        bearer_token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
+        if (auth_header and auth_header == Config.ADMIN_PASSWORD) or (bearer_token and bearer_token == Config.ADMIN_PASSWORD):
+            return None
+
         if not session.get("admin_authenticated"):
             if request.path.startswith("/api/admin"):
                 return jsonify({"error": "Unauthorized. Admin authentication required."}), 401
