@@ -47,7 +47,10 @@ jobs:
           while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
             STATUS_JSON=$(curl -sS "${{ secrets.RENDER_APP_URL }}/api/admin/scrape/status" \
               -H "X-Admin-Key: $ADMIN_PWD")
-            echo "Scrape Status: $STATUS_JSON"
+            
+            PHASE=$(echo "$STATUS_JSON" | grep -o '"phase":\s*"[^"]*"' | cut -d'"' -f4 || echo "unknown")
+            MSG=$(echo "$STATUS_JSON" | grep -o '"status_message":\s*"[^"]*"' | cut -d'"' -f4 || echo "")
+            echo "Current Status: Phase=[$PHASE] | Message=[$MSG]"
 
             # Check if is_running is true
             IS_RUNNING=$(echo "$STATUS_JSON" | grep -o '"is_running":\s*true' || true)
