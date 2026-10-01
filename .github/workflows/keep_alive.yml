@@ -14,8 +14,8 @@ jobs:
       - name: Send Ping to Render Healthz Endpoint
         run: |
           if [ -n "${{ secrets.RENDER_APP_URL }}" ]; then
-            echo "Pinging Render health endpoint..."
-            curl -sS -I "${{ secrets.RENDER_APP_URL }}/healthz" || echo "Failed to reach Render app"
+            echo "Pinging Render health endpoint (allowing up to 60s for cold start)..."
+            curl -sS -I --max-time 60 "${{ secrets.RENDER_APP_URL }}/healthz" || echo "Failed to reach Render app"
           else
             echo "RENDER_APP_URL secret is not configured in GitHub repository settings!"
           fi
@@ -24,7 +24,7 @@ jobs:
         run: |
           if [ -n "${{ secrets.SUPABASE_URL }}" ] && [ -n "${{ secrets.SUPABASE_KEY }}" ]; then
             echo "Pinging Supabase REST API..."
-            curl -sS -I "${{ secrets.SUPABASE_URL }}/rest/v1/" \
+            curl -sS -I --max-time 60 "${{ secrets.SUPABASE_URL }}/rest/v1/" \
               -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
               -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" || echo "Failed to reach Supabase"
           else
