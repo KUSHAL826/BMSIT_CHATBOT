@@ -13,21 +13,52 @@ jobs:
     steps:
       - name: Send Ping to Render Healthz Endpoint
         run: |
+          echo "============================================================"
+          echo " STEP 1: Pinging Render Web App"
+          echo " Time (UTC): $(date -u)"
+          echo " Target URL: ${{ secrets.RENDER_APP_URL }}/healthz"
+          echo "============================================================"
           if [ -n "${{ secrets.RENDER_APP_URL }}" ]; then
-            echo "Pinging Render health endpoint (allowing up to 60s for cold start)..."
-            curl -sS -I --max-time 60 "${{ secrets.RENDER_APP_URL }}/healthz" || echo "Failed to reach Render app"
+            echo "[1/2] Connecting to Render healthz endpoint..."
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 60 "${{ secrets.RENDER_APP_URL }}/healthz" || echo "000")
+            echo "[2/2] HTTP Response Code: $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "SUCCESS: Render Web App is online and active!"
+            else
+              echo "WARNING: Render Web App returned HTTP $HTTP_CODE"
+            fi
+            echo "--- Verbose Response Headers ---"
+            curl -sS -I --max-time 60 "${{ secrets.RENDER_APP_URL }}/healthz" || true
           else
-            echo "RENDER_APP_URL secret is not configured in GitHub repository settings!"
+            echo "ERROR: RENDER_APP_URL secret is not configured in GitHub repository settings!"
           fi
 
       - name: Send Ping to Supabase Database (if configured)
         run: |
+          echo ""
+          echo "============================================================"
+          echo " STEP 2: Pinging Supabase PostgreSQL Database"
+          echo " Time (UTC): $(date -u)"
+          echo " Target URL: ${{ secrets.SUPABASE_URL }}/rest/v1/"
+          echo "============================================================"
           if [ -n "${{ secrets.SUPABASE_URL }}" ] && [ -n "${{ secrets.SUPABASE_KEY }}" ]; then
-            echo "Pinging Supabase REST API..."
-            curl -sS -I --max-time 60 "${{ secrets.SUPABASE_URL }}/rest/v1/" \
+            echo "[1/3] Connecting to Supabase REST API..."
+            HTTP_CODE=$(curl -sS -o /dev/null -w "%{http_code}" --max-time 60 \
               -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
-              -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" || echo "Failed to reach Supabase"
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+              "${{ secrets.SUPABASE_URL }}/rest/v1/" || echo "000")
+            echo "[2/3] HTTP Response Code: $HTTP_CODE"
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "[3/3] SUCCESS: Supabase PostgreSQL Database responded! 7-day inactivity timer reset."
+            else
+              echo "[3/3] WARNING: Supabase returned HTTP $HTTP_CODE"
+            fi
+            echo "--- Verbose Response Headers ---"
+            curl -sS -I --max-time 60 \
+              -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" \
+              "${{ secrets.SUPABASE_URL }}/rest/v1/" || true
           else
-            echo "SUPABASE_URL/SUPABASE_KEY secrets not configured or Supabase ping skipped."
+            echo "SKIPPED: SUPABASE_URL/SUPABASE_KEY secrets not configured."
           fi
 

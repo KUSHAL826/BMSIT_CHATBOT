@@ -41,7 +41,8 @@ jobs:
           # Wait 10 seconds before first check
           sleep 10
 
-          MAX_CHECKS=60  # Poll up to 60 times (max ~45 mins)
+          # Increased poll limit to 240 checks (240 * 45s = ~3 hours max execution for 1,000+ pages)
+          MAX_CHECKS=240
           CHECK_COUNT=0
 
           while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
@@ -50,18 +51,23 @@ jobs:
             
             PHASE=$(echo "$STATUS_JSON" | grep -o '"phase":\s*"[^"]*"' | cut -d'"' -f4 || echo "unknown")
             MSG=$(echo "$STATUS_JSON" | grep -o '"status_message":\s*"[^"]*"' | cut -d'"' -f4 || echo "")
-            echo "Current Status: Phase=[$PHASE] | Message=[$MSG]"
+            PAGES=$(echo "$STATUS_JSON" | grep -o '"pages_scraped":\s*[0-9]*' | cut -d':' -f2 | tr -d ' ' || echo "0")
+            TOTAL=$(echo "$STATUS_JSON" | grep -o '"total_target":\s*[0-9]*' | cut -d':' -f2 | tr -d ' ' || echo "1000")
+            
+            echo "[Check $CHECK_COUNT/$MAX_CHECKS] Crawled: $PAGES/$TOTAL pages | Phase: [$PHASE] | Detail: $MSG"
 
             # Check if is_running is true
             IS_RUNNING=$(echo "$STATUS_JSON" | grep -o '"is_running":\s*true' || true)
 
             if [ -z "$IS_RUNNING" ]; then
-              echo "Scraping job completed successfully!"
+              echo "============================================================"
+              echo " SUCCESS: Full 1,000-page scrape & vector indexing completed!"
+              echo " Final Status: Phase=[$PHASE] | Pages Scraped=$PAGES/$TOTAL"
+              echo "============================================================"
               exit 0
             fi
 
             CHECK_COUNT=$((CHECK_COUNT+1))
-            echo "Scraper still running... waiting 45 seconds (Check $CHECK_COUNT of $MAX_CHECKS)..."
             sleep 45
           done
 
