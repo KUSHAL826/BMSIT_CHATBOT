@@ -2,6 +2,7 @@ name: Keep Alive Render & Supabase
 
 on:
   schedule:
+    # 05:30 AM IST (UTC+5:30) is 00:00 UTC
     - cron: '0 0 * * 1,4'
   workflow_dispatch:
 
@@ -10,6 +11,23 @@ jobs:
     name: Ping Render and Supabase
     runs-on: ubuntu-latest
     steps:
-      - name: Send Ping to Healthz Endpoint
+      - name: Send Ping to Render Healthz Endpoint
         run: |
-          curl -s -I -X GET "${{ secrets.RENDER_APP_URL }}/healthz"
+          if [ -n "${{ secrets.RENDER_APP_URL }}" ]; then
+            echo "Pinging Render health endpoint..."
+            curl -sS -I "${{ secrets.RENDER_APP_URL }}/healthz" || echo "Failed to reach Render app"
+          else
+            echo "RENDER_APP_URL secret is not configured in GitHub repository settings!"
+          fi
+
+      - name: Send Ping to Supabase Database (if configured)
+        run: |
+          if [ -n "${{ secrets.SUPABASE_URL }}" ] && [ -n "${{ secrets.SUPABASE_KEY }}" ]; then
+            echo "Pinging Supabase REST API..."
+            curl -sS -I "${{ secrets.SUPABASE_URL }}/rest/v1/" \
+              -H "apikey: ${{ secrets.SUPABASE_KEY }}" \
+              -H "Authorization: Bearer ${{ secrets.SUPABASE_KEY }}" || echo "Failed to reach Supabase"
+          else
+            echo "SUPABASE_URL/SUPABASE_KEY secrets not configured or Supabase ping skipped."
+          fi
+
