@@ -1,4 +1,4 @@
-name: Schedule Test
+name: Schedule Test - GitHub Scheduler
 
 on:
   push:
