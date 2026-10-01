@@ -11,15 +11,20 @@ jobs:
     name: Run Delta Web Scraper
     runs-on: ubuntu-latest
     steps:
-      - name: Trigger Scraper Endpoint
+      - name: Wake Up Render App (Pre-Wake Step)
         run: |
           if [ -z "${{ secrets.RENDER_APP_URL }}" ]; then
             echo "Error: RENDER_APP_URL secret is missing!"
             exit 1
           fi
 
-          echo "Triggering BMSIT website delta scrape (allowing up to 120s for Render cold start)..."
-          RESPONSE=$(curl -sS --max-time 120 --retry 3 --retry-delay 5 -X POST "${{ secrets.RENDER_APP_URL }}/api/admin/scrape")
+          echo "Waking up Render web service (allowing up to 3 minutes for cold start)..."
+          curl -sS -I --max-time 180 --retry 5 --retry-delay 5 "${{ secrets.RENDER_APP_URL }}/healthz" || echo "Pre-wake ping sent"
+
+      - name: Trigger Scraper Endpoint
+        run: |
+          echo "Triggering BMSIT website delta scrape..."
+          RESPONSE=$(curl -sS --max-time 60 --retry 3 --retry-delay 5 -X POST "${{ secrets.RENDER_APP_URL }}/api/admin/scrape")
           echo "Response: $RESPONSE"
 
       - name: Keep Render Awake & Poll Until Scraping Completes
@@ -29,7 +34,7 @@ jobs:
           # Wait 10 seconds before first check
           sleep 10
 
-          MAX_CHECKS=60  # Poll up to 60 times (max ~30-60 mins)
+          MAX_CHECKS=60  # Poll up to 60 times (max ~45 mins)
           CHECK_COUNT=0
 
           while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
