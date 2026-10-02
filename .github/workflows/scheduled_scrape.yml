@@ -2,8 +2,8 @@ name: Scheduled BMSIT Web Scrape & Ingestion
 
 on:
   schedule:
-    # Runs every Thursday at 02:47 PM IST (09:17 UTC)
-    - cron: '17 9 * * 4'
+    # Runs every Friday at 12:43 PM IST (07:13 UTC)
+    - cron: '13 7 * * 5'
   workflow_dispatch:
 
 jobs:

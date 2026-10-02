@@ -189,6 +189,7 @@ body {
 .icon-cyan { background: rgba(6, 182, 212, 0.15); color: var(--accent-cyan); }
 .icon-gold { background: rgba(245, 158, 11, 0.15); color: var(--accent-gold); }
 .icon-green { background: rgba(16, 185, 129, 0.15); color: var(--accent-green); }
+.icon-purple { background: rgba(139, 92, 246, 0.15); color: var(--accent-purple); }
 
 .metric-info {
   display: flex;
