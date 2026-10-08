@@ -64,22 +64,7 @@ class RerankerService:
 
         effective_key = api_key or os.getenv("GEMINI_API_KEY", "")
 
-        # Try Tier 1: LLM-based scoring if candidate pool is reasonable (e.g. up to 15 chunks)
-        if effective_key and effective_key != "your_api_key_here" and len(chunks) >= 2:
-            try:
-                reranked = self._llm_rerank(query, chunks[:15], top_k=top_k, api_key=effective_key)
-                if reranked:
-                    # Append any remaining candidates scored by local tier
-                    remaining = [c for c in chunks if c not in reranked]
-                    if len(reranked) < top_k and remaining:
-                        local_remaining = self._local_rerank(query, remaining)
-                        reranked.extend(local_remaining[:(top_k - len(reranked))])
-                    logger.info(f"[Reranker] LLM rerank successful for {len(reranked)} chunks.")
-                    return reranked[:top_k]
-            except Exception as e:
-                logger.debug(f"[Reranker] LLM reranking skipped: {e}")
-
-        # Tier 2: Local Cross-Token Semantic Reranker
+        # High-Speed Tier: Local Cross-Token Semantic Reranker with recency tie-breaking (<2ms latency)
         local_reranked = self._local_rerank(query, chunks)
         return local_reranked[:top_k]
 

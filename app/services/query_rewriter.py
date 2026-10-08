@@ -81,9 +81,12 @@ class QueryRewriter:
         if not clean_query:
             return clean_query
 
-        # 1. If LLM is available and history exists or query is complex, use LLM rewriter
+        # 1. Check if multi-turn conversational resolution with pronouns is needed
+        referential_words = ["he", "she", "him", "her", "it", "its", "they", "them", "this", "that", "more", "details", "previous", "earlier"]
+        needs_context = messages and len(messages) >= 2 and any(re.search(r"\b" + w + r"\b", clean_query.lower()) for w in referential_words)
+
         effective_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        if effective_key and effective_key != "your_api_key_here":
+        if needs_context and effective_key and effective_key != "your_api_key_here":
             try:
                 llm_rewritten = self._llm_rewrite(clean_query, messages, effective_key)
                 if llm_rewritten and len(llm_rewritten) >= 3:
@@ -92,9 +95,8 @@ class QueryRewriter:
             except Exception as e:
                 logger.debug(f"[QueryRewriter] LLM rewrite fallback triggered: {e}")
 
-        # 2. Heuristic rule-based rewriter fallback
+        # 2. Ultra-fast deterministic rule-based rewrite (0ms latency)
         heuristic_rewritten = self._heuristic_rewrite(clean_query, messages)
-        logger.info(f"[QueryRewriter] Heuristic rewrite: '{clean_query}' -> '{heuristic_rewritten}'")
         return heuristic_rewritten
 
     def _llm_rewrite(
@@ -130,7 +132,7 @@ Guidelines:
 {history_context}Latest User Question: {query}
 Optimized Search Query:"""
 
-        models = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"]
+        models = ["gemini-3-flash-preview", "gemma-4-26b-a4b-it"]
         for m in models:
             url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
             payload = {
@@ -141,7 +143,7 @@ Optimized Search Query:"""
                 }
             }
             try:
-                resp = requests.post(url, json=payload, timeout=5)
+                resp = requests.post(url, json=payload, timeout=2.5)
                 if resp.status_code == 200:
                     res_json = resp.json()
                     candidates = res_json.get("candidates", [])

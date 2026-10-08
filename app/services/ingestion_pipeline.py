@@ -201,6 +201,7 @@ def run_website_delta_ingestion(is_scheduled=False):
             if not item:
                 continue
             meta = item.get("metadata") or {}
+            title = item.get("title") or url
             now_ts = StorageService._now_ist_str()
             chunks_by_url[url] = rag.chunk_text(
                 text=item["text"],

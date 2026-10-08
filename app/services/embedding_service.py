@@ -585,13 +585,22 @@ class EmbeddingService:
     def embed_query(self, text, provider_id):
         """
         Embeds a query in one specific space, or returns None if that space is
-        not reachable. Never substitutes another model: a query vector from a
-        different space produces meaningless similarity scores.
+        not reachable. Checks the vector cache first for zero network latency.
         """
         backend = self.backend_for(provider_id)
         if backend is None or not backend.available():
             return None
-        return run_async(backend.embed_batch([self._truncate(text)], "RETRIEVAL_QUERY"))
+
+        truncated = self._truncate(text)
+        cache = VectorCache.get_instance()
+        hits, _ = cache.lookup([truncated], provider_id)
+        if 0 in hits:
+            return np.array([hits[0]], dtype=np.float32)
+
+        vectors = run_async(backend.embed_batch([truncated], "RETRIEVAL_QUERY"))
+        if vectors is not None and len(vectors):
+            cache.store([(truncated, vectors[0])], provider_id)
+        return vectors
 
 
 def run_async(coro):

@@ -14,6 +14,7 @@ space, so switching model or falling back to local vectors cannot corrupt rankin
 Every mutation embeds first and swaps second, so an interrupted or failing run
 can never leave the knowledge base empty.
 """
+from datetime import datetime
 import difflib
 import hashlib
 import logging
@@ -804,25 +805,6 @@ class RAGService:
                     for position, score in hits:
                         normalized = (score - low) / spread if spread > 0 else score
                         dense_scores[position] = max(dense_scores.get(position, 0.0), normalized)
-
-            # Also embed synonym-enriched query to boost recall for domain terms
-            if expanded_synonyms:
-                enriched_text = f"{query} {expanded_synonyms}"
-                query_vector_enriched = self._embedder.embed_query(enriched_text, provider)
-                if query_vector_enriched is not None and len(query_vector_enriched):
-                    search_k = min(len(positions), max(fetch_k, 40))
-                    scores, ids = index.search(np.ascontiguousarray(query_vector_enriched), search_k)
-                    hits = [
-                        (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
-                        if 0 <= i < len(positions)
-                    ]
-                    if hits:
-                        values = [s for _, s in hits]
-                        low, high = min(values), max(values)
-                        spread = (high - low) or 1.0
-                        for position, score in hits:
-                            normalized = (score - low) / spread if spread > 0 else score
-                            dense_scores[position] = max(dense_scores.get(position, 0.0), normalized)
 
         candidates = {}
 
