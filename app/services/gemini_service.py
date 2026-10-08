@@ -83,6 +83,15 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
 9. HIGHLIGHT CORE ANSWERS IN BOLD (CRITICAL REQUIREMENT):
    - You MUST highlight the main core part of the answer, key names, essential facts, numbers, dates, exam names, branches, and vital details in **bold** markdown (e.g. **Dr. Sanjay H. A.**, **KCET**, **COMEDK**, **₹1,61,200**, **95% placement rate**, **Cluster 1 Associate Head Dr. Mahesh G**).
    - This ensures students and parents can instantly scan and read the core answers clearly.
+
+10. LASER FOCUS (ZERO UNRELATED / EXTRA TOPIC SPILLOVER):
+    - Answer ONLY the specific subject, program, or facility queried.
+    - NEVER introduce peripheral or tangential departments, clubs, or topics. For example, if asked about a specific laboratory (such as AICTE IDEA Lab), discuss ONLY that laboratory and its activities—do NOT append intros or snippets of other engineering branches (such as Civil or Mechanical Engineering) simply because they share an acronym or keyword.
+    - If asked about courses or engineering branches, list only the verified degree programs offered directly; do NOT divert to faculty speeches, talks, or conference papers.
+
+11. DYNAMIC ADAPTIVE LENGTH & BREVITY:
+    - If the user specifies a length constraint (e.g. "in one line", "in a single sentence", "in 2 points", "briefly", "in detail"), adhere strictly to that exact constraint.
+    - If NO length constraint is given by the user, provide a **crisp, structured, and brief** response (neither overly lengthy nor too brief). Deliver the answer in 2–4 clear bullet points highlighting key entities in **bold**.
 """
 
 
@@ -390,8 +399,8 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
                 }
             }
             try:
-                # Fast 5s timeout to avoid stalls and ensure rapid failover
-                resp = requests.post(url, json=payload, timeout=5.0)
+                # Fast 4s timeout per model to guarantee sub-second failover and reduce latency
+                resp = requests.post(url, json=payload, timeout=4.0)
                 if resp.status_code == 200:
                     res_json = resp.json()
                     candidates = res_json.get("candidates", [])
@@ -421,6 +430,8 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
         Robust extractive synthesis fallback when API key is offline or quota exceeded.
         Finds matching sentences in retrieved chunks and presents them clearly.
         Strictly refuses to answer when core query information is absent from context.
+        Laser focused on the specific queried topic without extraneous departments.
+        Adheres to adaptive length constraints (e.g. 'in one line', 'briefly').
         """
         unknown_message = (
             "As of now, I don't have verified information regarding this in the BMSIT knowledge base. "
@@ -436,13 +447,50 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
 
         q_lower = query.lower()
 
+        # Length constraint flags
+        one_line_requested = bool(re.search(r"\b(one\s+line|single\s+sentence|in\s+short)\b", q_lower))
+        brief_requested = bool(re.search(r"\b(brief|briefly|summary)\b", q_lower))
+
+        # Check if query asks for courses/branches/programs
+        is_courses_query = any(k in q_lower for k in ["course", "branch", "program", "stream", "department", "degree"])
+
+        # 1. SPECIALIZED PROGRAM EXTRACTION: If user asks for courses / branches offered
+        if is_courses_query:
+            all_programs = []
+            for c in chunks:
+                raw_text = c.get("text", "")
+                prog_matches = re.findall(r"([A-Za-z\s&.()]+?)\s+Duration\s+(\d+\s+Years?)\s+Intake\s+(\d+)", raw_text)
+                for prog, dur, intake in prog_matches:
+                    clean_prog = prog.strip().split("Contact")[-1].split("Circulars")[-1].split("Syllabus")[-1].split("Now")[-1].strip()
+                    if clean_prog and len(clean_prog) > 3:
+                        entry = f"**{clean_prog}** (Duration: {dur}, Annual Intake: {intake})"
+                        if entry not in all_programs:
+                            all_programs.append(entry)
+
+            if all_programs:
+                if one_line_requested:
+                    progs_summary = ", ".join(p.split("**")[1] for p in all_programs[:6])
+                    return f"BMSIT offers accredited programs including **{progs_summary}**, and more."
+                elif brief_requested:
+                    bullet_list = "\n".join(f"* {p}" for p in all_programs[:6])
+                    return f"**Engineering Branches and Programs Offered at BMSIT:**\n\n{bullet_list}\n\n*(Full details available in official Admissions records)*"
+                else:
+                    ug_progs = [p for p in all_programs if "Master" not in p and "M.Tech" not in p and "MBA" not in p and "MCA" not in p]
+                    pg_progs = [p for p in all_programs if p not in ug_progs]
+                    sections = []
+                    if ug_progs:
+                        sections.append("**Undergraduate (B.E.) Engineering Branches:**\n" + "\n".join(f"* {p}" for p in ug_progs))
+                    if pg_progs:
+                        sections.append("**Postgraduate Programs (M.Tech / MBA / MCA):**\n" + "\n".join(f"* {p}" for p in pg_progs))
+                    return f"Based on BMSIT verified official records (Admissions):\n\n" + "\n\n".join(sections)
+
         # Tokenize query into meaningful search terms
         stop_words = {
             "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
             "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit",
             "bms", "college", "institute", "campus", "info", "information", "him", "her", "his",
             "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
-            "who", "whom", "whose", "have", "has", "had", "give", "list"
+            "who", "whom", "whose", "have", "has", "had", "give", "list", "please"
         }
         raw_words = [
             w.lower() for w in re.findall(r"\w+", query)
@@ -460,7 +508,7 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
         }
         core_nouns = [s for s in distinguishing_stems if s not in generic_words and s not in {"engineering"}]
 
-        # If the user asked about specific core nouns (e.g. helicopter, horse, library),
+        # If the user asked about specific core nouns (e.g. helicopter, horse, library, idea lab),
         # verify that at least one core noun appears in the retrieved documents before synthesizing
         if core_nouns:
             retrieved_tokens = set(re.findall(r"\b[a-z0-9]+\b", " ".join(c.get("text", "") for c in chunks).lower()))
@@ -504,31 +552,63 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
         # Sort candidate lines by match score, then recency
         candidate_lines.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-        # Collect verified facts across all matching sources from the actual retrieved documents
+        # Collect verified facts strictly from matching sources
+        # Discard weak spillover sources (e.g. Civil or Mechanical mentioning 'AICTE' when query is about IDEA Lab)
+        max_matches = candidate_lines[0][0]
+        min_allowed_matches = max(1, max_matches - 1) if max_matches <= 2 else 2
+
         source_sections = {}
-        for _, _, line, src in candidate_lines:
+        top_sources = []
+        for match_cnt, _, line, src in candidate_lines:
+            if match_cnt < min_allowed_matches:
+                continue
             clean = line.strip()
+            # Clean duplicate heading repeats at start e.g. "AICTE IDEA Lab AICTE IDEA Lab ..."
+            clean = re.sub(r"^(?:" + re.escape(src) + r"\s*)+", "", clean, flags=re.IGNORECASE).strip()
+            if not clean:
+                clean = line.strip()
             if src not in source_sections:
                 source_sections[src] = []
+                top_sources.append(src)
             if clean not in source_sections[src] and len(clean) > 20:
                 source_sections[src].append(clean)
 
+        if not source_sections:
+            return unknown_message
+
+        # Output formatting with adaptive length (strictly primary source if it answers the query)
+        # If top source has at least 2 verified lines, isolate it exclusively to prevent topic spillover!
+        if top_sources and len(source_sections.get(top_sources[0], [])) >= 2:
+            primary_sources = [top_sources[0]]
+        else:
+            primary_sources = top_sources[:2]
+
         output_blocks = []
-        contributing_sources = []
-        for src, lines in source_sections.items():
-            contributing_sources.append(src)
-            top_lines = lines[:2]
-            output_blocks.append(f"**{src}:**\n" + "\n".join(f"* {l}" for l in top_lines))
-            if len(output_blocks) >= 4:
+        for src in primary_sources:
+            lines = source_sections.get(src, [])
+            if not lines:
+                continue
+            if one_line_requested:
+                output_blocks.append(f"**{src}**: {lines[0]}")
                 break
+            elif brief_requested:
+                top_lines = lines[:2]
+                output_blocks.append(f"**{src}:**\n" + "\n".join(f"* {l}" for l in top_lines))
+                break
+            else:
+                top_lines = lines[:3]
+                output_blocks.append(f"**{src}:**\n" + "\n".join(f"* {l}" for l in top_lines))
 
         if not output_blocks:
             return unknown_message
 
-        primary_source = ", ".join(contributing_sources)
+        if one_line_requested:
+            return output_blocks[0]
+
+        src_label = ", ".join(primary_sources)
         formatted_answer = "\n\n".join(output_blocks)
         return (
-            f"Based on BMSIT verified official records ({primary_source}):\n\n"
+            f"Based on BMSIT verified official records ({src_label}):\n\n"
             f"{formatted_answer}\n\n"
-            f"> *Source: {primary_source}*"
+            f"> *Source: {src_label}*"
         )

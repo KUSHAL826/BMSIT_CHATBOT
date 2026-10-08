@@ -89,7 +89,7 @@ _SPEC = {
     # Retrieval / chat
     "TOP_K": ("int", 6),
     "CHAT_TIMEOUT": ("int", 15),
-    "CHAT_MODELS": ("list", "gemini-3.5-flash,gemma-4-26b-a4b-it,gemini-3-flash-preview"),
+    "CHAT_MODELS": ("list", "gemini-3.5-flash,gemini-3-flash-preview"),
 
     # Supabase Vector Store
     "SUPABASE_URL": ("str", ""),

@@ -769,8 +769,11 @@ class RAGService:
             title_hits = sum(1 for stem in stems if stem in title_lower)
 
             entry = dict(chunk)
-            # Combine dense vector similarity with keyword and title relevance
-            entry["score"] = round(dense_score + keyword_hits * 0.18 + title_hits * 0.22, 4)
+            # Dense vector similarity is the primary semantic signal
+            # Auxiliary lexical & title match serve only as subtle tie-breakers (max ~0.15 total)
+            norm_kw = min(keyword_hits * 0.025, 0.10)
+            norm_title = min(title_hits * 0.035, 0.07)
+            entry["score"] = round(dense_score * 0.85 + norm_kw + norm_title, 4)
             entry["kw_matches"] = keyword_hits
             entry["dense_score"] = round(dense_score, 4)
             current = candidates.get(position)

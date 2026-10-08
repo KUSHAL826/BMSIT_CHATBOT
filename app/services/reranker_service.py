@@ -88,14 +88,6 @@ class RerankerService:
         ]
         stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_terms]
 
-        SYNONYM_EXPANSIONS = {
-            "cluster": ["division", "cluster"],
-            "division": ["cluster", "division"],
-            "hod": ["head", "associate head", "associate hod", "hod"],
-            "head": ["hod", "head", "associate head"],
-            "associate": ["associate", "associate head", "associate professor"],
-        }
-
         scored_chunks = []
         for chunk in chunks:
             text = chunk.get("text", "")
@@ -104,48 +96,38 @@ class RerankerService:
             metadata = chunk.get("metadata") or {}
             sec = str(metadata.get("section_title") or "").lower()
             initial_score = float(chunk.get("score", 0.0))
+            dense_score = float(chunk.get("dense_score", initial_score))
 
-            # 1. Exact phrase match bonus
+            # 1. Exact phrase match bonus (purely dynamic)
             exact_phrase_bonus = 0.0
             if len(raw_terms) >= 2:
                 phrase = " ".join(raw_terms[:4])
                 if phrase in text_lower:
-                    exact_phrase_bonus = 0.40
-                else:
-                    for c_num in range(1, 6):
-                        c_str = f"cluster {c_num}"
-                        if (c_str in phrase or f"{c_str} hod" in phrase) and (f"division {c_num}" in text_lower or c_str in text_lower):
-                            exact_phrase_bonus = 0.50
-                            break
+                    exact_phrase_bonus = 0.12
 
-            # 2. Key stem density & coverage with institutional synonyms
+            # 2. Key stem density & coverage
             matched_stems = set()
-            term_occurrences = 0
             for st in stems:
-                st_synonyms = SYNONYM_EXPANSIONS.get(st, [st])
-                matches = 0
-                for syn in st_synonyms:
-                    matches += len(re.findall(r"\b" + re.escape(syn), text_lower))
-                if matches > 0:
+                if re.search(r"\b" + re.escape(st), text_lower):
                     matched_stems.add(st)
-                    term_occurrences += matches
 
             stem_coverage = len(matched_stems) / max(len(stems), 1)
-            coverage_score = stem_coverage * 0.45
+            coverage_score = min(stem_coverage * 0.15, 0.15)
 
             # 3. Title and section alignment
             title_match = sum(1 for st in stems if st in source_name or st in sec)
-            title_score = min(title_match * 0.15, 0.30)
+            title_score = min(title_match * 0.05, 0.10)
 
             # 4. Numerical/factual presence (if query asks for fees, cutoffs, dates, or intake)
             numeric_bonus = 0.0
             has_numeric_query = any(k in query_lower for k in ["fee", "fees", "cost", "cutoff", "intake", "phone", "package", "ctc"])
             if has_numeric_query and re.search(r"(₹|\b\d{2,6}\b|lpa|inr)", text_lower):
-                numeric_bonus = 0.25
+                numeric_bonus = 0.08
 
-            # 5. Composite rerank score
+            # 5. Composite rerank score anchored predominantly on semantic vector similarity
             rerank_score = (
-                (initial_score * 0.35) +
+                (dense_score * 0.70) +
+                (initial_score * 0.15) +
                 coverage_score +
                 exact_phrase_bonus +
                 title_score +
