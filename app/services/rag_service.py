@@ -623,7 +623,13 @@ class RAGService:
         "division": ["cluster", "section", "department", "unit", "batch"],
         "section": ["cluster", "division", "batch"],
         "dept": ["department", "division", "branch"],
-        "department": ["dept", "division", "branch"],
+        "department": ["dept", "division", "branch", "programs", "courses"],
+        "branch": ["branches", "courses", "programs", "departments", "engineering", "degrees", "undergraduate"],
+        "branches": ["branch", "courses", "programs", "departments", "engineering", "degrees", "undergraduate"],
+        "course": ["courses", "programs", "branches", "departments", "curriculum", "syllabus"],
+        "courses": ["course", "programs", "branches", "departments", "curriculum", "syllabus"],
+        "program": ["programs", "courses", "branches", "undergraduate", "postgraduate", "be", "btech", "mtech", "mca"],
+        "programs": ["program", "courses", "branches", "undergraduate", "postgraduate", "be", "btech", "mtech", "mca"],
         "cse": ["computer science", "engineering"],
         "ise": ["information science", "engineering"],
         "ece": ["electronics", "communication", "engineering"],
@@ -635,13 +641,18 @@ class RAGService:
         "ml": ["machine learning"],
         "aiml": ["artificial intelligence", "machine learning"],
         "aids": ["artificial intelligence", "data science"],
-        "principal": ["head of institution", "director"],
-        "fee": ["fees", "tuition", "payment", "cost", "charges"],
-        "fees": ["fee", "tuition", "payment", "cost", "charges"],
-        "hostel": ["accommodation", "dormitory", "residence"],
-        "placement": ["placements", "recruiters", "jobs", "hiring", "offers"],
-        "placements": ["placement", "recruiters", "jobs", "hiring", "offers"],
-        "prof": ["professor", "faculty", "doctor", "dr"],
+        "vlsi": ["vlsi system design", "mtech"],
+        "principal": ["head of institution", "director", "mohan babu", "vanarotti"],
+        "fee": ["fees", "tuition", "payment", "cost", "charges", "structure"],
+        "fees": ["fee", "tuition", "payment", "cost", "charges", "structure"],
+        "hostel": ["accommodation", "dormitory", "residence", "rooms", "mess"],
+        "pmsss": ["prime minister special scholarship scheme", "jk quota", "hostel"],
+        "placement": ["placements", "recruiters", "jobs", "hiring", "offers", "packages", "ctc"],
+        "placements": ["placement", "recruiters", "jobs", "hiring", "offers", "packages", "ctc"],
+        "admission": ["admissions", "eligibility", "apply", "kcet", "comedk", "management quota"],
+        "admissions": ["admission", "eligibility", "apply", "kcet", "comedk", "management quota"],
+        "eligibility": ["criteria", "requirements", "qualification", "admission", "cutoffs"],
+        "prof": ["professor", "faculty", "doctor", "dr", "teacher"],
         "dr": ["doctor", "professor", "faculty"],
     }
 
@@ -724,11 +735,12 @@ class RAGService:
             logger.info("[RAG] Spelling repaired: %s", corrections)
         return expanded, corrections
 
-    def retrieve(self, query, top_k=None):
+    def retrieve(self, query, top_k=None, enable_rerank=True):
         """
-        FAISS Pure Dense Vector Semantic Search:
-        Embeds the query into dense vector space and searches FAISS index using vector similarity.
-        Works across all dimensions for any natural language input, including undefined words or phrasing.
+        Production Two-Stage Hybrid Retrieval:
+        Stage 1: Broad-Recall Candidate Generation (Dense FAISS + Comprehensive Lexical BM25).
+        Stage 2: Cross-Attention / Cross-Token Semantic Reranking to surface the most directly
+                 relevant passages to Rank 1..TOP_K.
         """
         with self._lock:
             if not self._chunks:
@@ -737,6 +749,7 @@ class RAGService:
             spaces = dict(self._spaces)
 
         k = top_k or Config.TOP_K
+        fetch_k = max(k * 3, 25)  # Expanded candidate pool for reranker
         expanded_synonyms = self._expand_synonyms(query)
         raw_stems = self._query_stems(f"{query} {expanded_synonyms}")
         stems, corrections = self.correct_terms(raw_stems)
@@ -750,7 +763,7 @@ class RAGService:
             # FAISS vector search with raw user query
             query_vector = self._embedder.embed_query(query, provider)
             if query_vector is not None and len(query_vector):
-                search_k = min(len(positions), max(k * 5, 40))
+                search_k = min(len(positions), max(fetch_k, 40))
                 scores, ids = index.search(np.ascontiguousarray(query_vector), search_k)
                 hits = [
                     (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
@@ -769,7 +782,7 @@ class RAGService:
                 enriched_text = f"{query} {expanded_synonyms}"
                 query_vector_enriched = self._embedder.embed_query(enriched_text, provider)
                 if query_vector_enriched is not None and len(query_vector_enriched):
-                    search_k = min(len(positions), max(k * 5, 40))
+                    search_k = min(len(positions), max(fetch_k, 40))
                     scores, ids = index.search(np.ascontiguousarray(query_vector_enriched), search_k)
                     hits = [
                         (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
@@ -796,38 +809,51 @@ class RAGService:
             title_hits = sum(1 for stem in stems if stem in title_lower)
 
             entry = dict(chunk)
-            # FAISS dense vector similarity is the primary score
-            entry["score"] = round(dense_score + keyword_hits * 0.15 + title_hits * 0.10, 4)
+            # Combine dense vector similarity with keyword and title relevance
+            entry["score"] = round(dense_score + keyword_hits * 0.18 + title_hits * 0.22, 4)
             entry["kw_matches"] = keyword_hits
             entry["dense_score"] = round(dense_score, 4)
             current = candidates.get(position)
             if current is None or entry["score"] > current["score"]:
                 candidates[position] = entry
 
+        # Score all vector search candidates
         for position, score in dense_scores.items():
             consider(position, score)
 
-        # Fallback lexical sweep if dense FAISS index is empty/sparse
-        if stems and len(candidates) < k:
+        # Comprehensive lexical pass: ensure exact keyword/entity hits across all chunks are never overlooked
+        if stems:
             for position, chunk in enumerate(chunks):
-                if position in candidates:
-                    continue
                 text_lower = chunk.get("text", "").lower()
-                keyword_hits = sum(
-                    1 for stem in stems if re.search(r"\b" + re.escape(stem), text_lower)
-                )
-                if keyword_hits >= 2 or (len(stems) == 1 and keyword_hits >= 1):
-                    consider(position, 0.10)
+                title_lower = (
+                    f"{chunk.get('source_name', '')} {(chunk.get('metadata') or {}).get('title', '')}"
+                ).lower()
+                keyword_hits = sum(1 for stem in stems if re.search(r"\b" + re.escape(stem), text_lower))
+                title_hits = sum(1 for stem in stems if stem in title_lower)
+                if keyword_hits > 0 or title_hits > 0:
+                    dense_score = dense_scores.get(position, 0.0)
+                    consider(position, dense_score)
 
         ranked = sorted(candidates.values(), key=lambda c: c["score"], reverse=True)
 
-        final, per_item = [], {}
+        # Apply per-document cap to preserve source diversity in candidate pool
+        pool, per_item = [], {}
         for chunk in ranked:
             key = (chunk.get("source_id"), chunk.get("item_key"))
             if per_item.get(key, 0) >= 3:
                 continue
             per_item[key] = per_item.get(key, 0) + 1
-            final.append(chunk)
-            if len(final) >= k:
+            pool.append(chunk)
+            if len(pool) >= fetch_k:
                 break
-        return final
+
+        # Stage 2: Reranking
+        if enable_rerank and pool:
+            try:
+                from app.services.reranker_service import RerankerService
+                return RerankerService.get_instance().rerank(query, pool, top_k=k)
+            except Exception as e:
+                logger.error(f"[RAG] Reranking failed, using hybrid candidate ranking: {e}")
+
+        return pool[:k]
+

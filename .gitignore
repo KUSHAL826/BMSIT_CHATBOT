@@ -3,6 +3,7 @@
 
 # Runtime data: index, knowledge store, registry, uploads
 data/
+scratch/
 
 # Python
 __pycache__/

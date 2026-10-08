@@ -19,6 +19,11 @@
 
   var history = [];
   var busy = false;
+  var sessionId = localStorage.getItem("bmsit_chat_session");
+  if (!sessionId) {
+    sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
+    localStorage.setItem("bmsit_chat_session", sessionId);
+  }
 
   /* ---------------- helpers ---------------- */
 
@@ -244,7 +249,11 @@
     fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ message: text, history: history.slice(-MAX_HISTORY_TURNS * 2) })
+      body: JSON.stringify({
+        message: text,
+        history: history.slice(-MAX_HISTORY_TURNS * 2),
+        session_id: sessionId
+      })
     })
       .then(function (response) {
         return response.json().catch(function () {
@@ -306,6 +315,16 @@
 
   if (clearButton) {
     clearButton.addEventListener("click", function () {
+      if (sessionId) {
+        fetch("/api/chat/clear", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ session_id: sessionId })
+        }).catch(function () {});
+      }
+      sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
+      localStorage.setItem("bmsit_chat_session", sessionId);
+
       history = [];
       conversation.innerHTML = "";
       var fresh = document.createElement("section");
@@ -318,6 +337,7 @@
       input.focus();
     });
   }
+
 
   loadStatus();
   autoGrow();
