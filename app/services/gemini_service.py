@@ -473,9 +473,9 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
                     "maxOutputTokens": 1024
                 }
             }
+            timeout_sec = float(getattr(Config, "CHAT_TIMEOUT", 15) or 15)
             try:
-                # Fast 4s timeout per model to guarantee sub-second failover and reduce latency
-                resp = requests.post(url, json=payload, timeout=4.0)
+                resp = requests.post(url, json=payload, timeout=timeout_sec)
                 if resp.status_code == 200:
                     res_json = resp.json()
                     candidates = res_json.get("candidates", [])

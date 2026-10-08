@@ -17,11 +17,32 @@ import time
 import warnings
 from typing import Dict, List, Optional
 
-import requests
-with warnings.catch_warnings():
-    warnings.filterwarnings("ignore", message=".*InMemoryChatMessageHistory.*")
-    from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
-    from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.chat_history import BaseChatMessageHistory
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+
+
+class InMemoryChatMessageHistory(BaseChatMessageHistory):
+    """
+    Standard in-memory chat message history implementation extending BaseChatMessageHistory.
+    100% compliant with LangChain 1.x and 2.0 without deprecation warnings.
+    """
+    def __init__(self):
+        self.messages: List[BaseMessage] = []
+
+    def add_message(self, message: BaseMessage) -> None:
+        self.messages.append(message)
+
+    def add_messages(self, messages: List[BaseMessage]) -> None:
+        self.messages.extend(messages)
+
+    def add_user_message(self, message: str) -> None:
+        self.messages.append(HumanMessage(content=message))
+
+    def add_ai_message(self, message: str) -> None:
+        self.messages.append(AIMessage(content=message))
+
+    def clear(self) -> None:
+        self.messages = []
 
 from app.config import Config
 

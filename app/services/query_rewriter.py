@@ -110,7 +110,7 @@ Optimized Search Query:"""
                 }
             }
             try:
-                resp = requests.post(url, json=payload, timeout=2.5)
+                resp = requests.post(url, json=payload, timeout=5.0)
                 if resp.status_code == 200:
                     res_json = resp.json()
                     candidates = res_json.get("candidates", [])
