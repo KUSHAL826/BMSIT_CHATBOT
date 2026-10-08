@@ -322,20 +322,36 @@ class GeminiService:
             "offer", "offered", "study", "studies", "educate", "education", "undergraduate", "postgraduate",
             "degree", "degrees", "academic", "academics", "seat", "seats", "intake"
         }
+        formatting_words = {
+            "line", "lines", "point", "points", "bullet", "bullets", "sentence", "sentences",
+            "word", "words", "para", "paras", "paragraph", "paragraphs", "page", "pages",
+            "overview", "summary", "summarize", "brief", "briefly", "short", "long", "detail", "details",
+            "detailed", "explain", "explanation", "describe", "description", "tell", "give",
+            "show", "write", "provide", "share", "highlight", "highlights", "know", "view"
+        }
         q_raw_words = [
             w.lower() for w in re.findall(r"\w+", user_message)
-            if w.lower() not in stop_words and (len(w) > 2 or w.isdigit())
+            if w.lower() not in stop_words
+            and w.lower() not in formatting_words
+            and not re.match(r"^\d+(?:line|lines|point|points|bullet|bullets|sentence|sentences|word|words|para|paragraphs?)?$", w.lower())
+            and not w.isdigit()
+            and len(w) > 2
         ]
         q_stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in q_raw_words]
         q_distinguishing = [
             s for s in q_stems
             if s not in {"tell", "about", "what", "who", "which", "give", "list", "bmsit", "bms", "college", "institute", "campus", "engineering"}
+            and s not in formatting_words
         ]
         q_core_nouns = [s for s in q_distinguishing if s not in generic_words and s not in {"engineering"}]
 
         is_courses_query = any(k in user_message.lower() for k in ["course", "branch", "program", "stream", "department", "degree"])
+        is_institution_overview = (
+            not q_distinguishing and any(k in user_message.lower() for k in ["bmsit", "bms", "college", "institute", "campus", "institution"])
+        ) or any(phrase in user_message.lower() for phrase in ["about bmsit", "tell about bmsit", "what is bmsit", "overview of bmsit", "bmsit overview"])
+
         all_text = " ".join(c.get("text", "") for c in retrieved_chunks).lower()
-        if not is_courses_query and q_core_nouns and not any(re.search(r"\b" + re.escape(cn), all_text) for cn in q_core_nouns):
+        if not is_courses_query and not is_institution_overview and q_core_nouns and not any(re.search(r"\b" + re.escape(cn), all_text) for cn in q_core_nouns):
             subj_title = " ".join(q_distinguishing).title() if q_distinguishing else "this topic"
             missing_reply = (
                 f"As of now, I don't have verified information regarding **{subj_title}** in the BMSIT knowledge base. "
@@ -502,14 +518,26 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
             "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
             "who", "whom", "whose", "have", "has", "had", "give", "list", "please"
         }
+        formatting_words = {
+            "line", "lines", "point", "points", "bullet", "bullets", "sentence", "sentences",
+            "word", "words", "para", "paras", "paragraph", "paragraphs", "page", "pages",
+            "overview", "summary", "summarize", "brief", "briefly", "short", "long", "detail", "details",
+            "detailed", "explain", "explanation", "describe", "description", "tell", "give",
+            "show", "write", "provide", "share", "highlight", "highlights", "know", "view"
+        }
         raw_words = [
             w.lower() for w in re.findall(r"\w+", query)
-            if w.lower() not in stop_words and (len(w) > 2 or w.isdigit())
+            if w.lower() not in stop_words
+            and w.lower() not in formatting_words
+            and not re.match(r"^\d+(?:line|lines|point|points|bullet|bullets|sentence|sentences|word|words|para|paragraphs?)?$", w.lower())
+            and not w.isdigit()
+            and len(w) > 2
         ]
         stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_words]
         distinguishing_stems = [
             s for s in stems
             if s not in {"tell", "about", "what", "who", "which", "give", "list", "bmsit", "bms", "college", "institute", "campus", "engineering"}
+            and s not in formatting_words
         ]
         generic_words = {
             "facilitie", "facility", "facilities", "provide", "provided", "available",
@@ -524,6 +552,17 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
         }
         core_nouns = [s for s in distinguishing_stems if s not in generic_words and s not in {"engineering"}]
 
+        # Length constraint flags
+        one_line_requested = bool(re.search(r"\b(one\s+line|single\s+sentence|in\s+short)\b", q_lower))
+        brief_requested = bool(re.search(r"\b(brief|briefly|summary)\b", q_lower))
+        target_lines_match = re.search(r"\b(\d+)\s*(?:line|lines|pt|point|points|bullet|bullets|sentence|sentences)\b", q_lower)
+        target_count = int(target_lines_match.group(1)) if target_lines_match else None
+
+        # Check if query asks for institution overview
+        is_institution_overview = (
+            not distinguishing_stems and any(k in q_lower for k in ["bmsit", "bms", "college", "institute", "campus", "institution"])
+        ) or any(phrase in q_lower for phrase in ["about bmsit", "tell about bmsit", "what is bmsit", "overview of bmsit", "bmsit overview"])
+
         subject_display = " ".join(distinguishing_stems).title() if distinguishing_stems else "this topic"
         unknown_message = (
             f"As of now, I don't have verified information regarding **{subject_display}** in the BMSIT knowledge base. "
@@ -537,14 +576,15 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
         if not chunks:
             return unknown_message
 
-        # Length constraint flags
-        one_line_requested = bool(re.search(r"\b(one\s+line|single\s+sentence|in\s+short)\b", q_lower))
-        brief_requested = bool(re.search(r"\b(brief|briefly|summary)\b", q_lower))
-
-        # Check if query asks for courses/branches/programs
-        is_courses_query = any(k in q_lower for k in ["course", "branch", "program", "stream", "department", "degree"])
+        # Navigation boilerplate keywords that indicate raw site menus rather than informative sentences
+        nav_boilerplate_tokens = {
+            "notification", "syllabus", "circulars", "brochure", "bus routes",
+            "accreditation", "student clubs", "placements reports", "patents", "mous",
+            "apply now", "fees structure", "counselling", "greenery", "hostels counselling"
+        }
 
         # 1. SPECIALIZED PROGRAM EXTRACTION: If user asks for courses / branches offered
+        is_courses_query = any(k in q_lower for k in ["course", "branch", "program", "stream", "department", "degree"])
         if is_courses_query:
             all_programs = []
             for c in chunks:
@@ -574,20 +614,55 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
                         sections.append("**Postgraduate Programs (M.Tech / MBA / MCA):**\n" + "\n".join(f"* {p}" for p in pg_progs))
                     return f"Based on BMSIT verified official records (Admissions):\n\n" + "\n\n".join(sections)
 
-        # If the user asked about specific core nouns (e.g. helicopter, krishi, idea lab),
-        # verify that at least one core noun appears in the retrieved documents before synthesizing
+        # 2. INSTITUTION OVERVIEW: If user asks for general overview or about BMSIT in N lines/points
+        if is_institution_overview:
+            overview_lines = []
+            seen_snippets = set()
+            for c in chunks:
+                raw_text = c.get("text", "")
+                sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", raw_text) if len(s.strip()) > 20]
+                for s in sentences:
+                    s_lower = s.lower()
+                    if sum(1 for nav in nav_boilerplate_tokens if nav in s_lower) >= 2:
+                        continue
+                    key_indicators = [
+                        "established", "bmsit", "institute", "engineering", "college", "program",
+                        "programme", "autonomous", "vtu", "vision", "mission", "trust", "campus",
+                        "accredit", "naac", "nba", "ranking", "placement", "faculty", "student",
+                        "research", "facility", "facilities", "yelahanka", "bangalore", "bengaluru"
+                    ]
+                    if any(k in s_lower for k in key_indicators):
+                        normalized = re.sub(r"\s+", " ", s.lower()[:60])
+                        if normalized not in seen_snippets:
+                            seen_snippets.add(normalized)
+                            bolded = s
+                            for term in [
+                                "BMS Institute of Technology and Management", "BMSIT&M", "BMSIT",
+                                "VTU", "NAAC", "NBA", "AICTE", "Autonomous", "2002",
+                                "Yelahanka", "Bengaluru", "A+ Grade"
+                            ]:
+                                bolded = re.sub(r"\b" + re.escape(term) + r"\b", f"**{term}**", bolded, flags=re.IGNORECASE)
+                            overview_lines.append(bolded)
+
+            if overview_lines:
+                limit = target_count if target_count is not None else (10 if not brief_requested and not one_line_requested else 3)
+                selected = overview_lines[:limit]
+                if one_line_requested:
+                    return f"**BMSIT&M**: {selected[0]}"
+                bullets = "\n".join(f"* {line}" for line in selected)
+                return (
+                    f"Based on BMSIT verified official records:\n\n"
+                    f"**BMS Institute of Technology and Management (BMSIT&M) Overview:**\n\n"
+                    f"{bullets}\n\n"
+                    f"> *Source: Official BMSIT Institutional Records*"
+                )
+
+        # 3. SPECIFIC TOPIC GROUNDING: Verify core nouns appear in retrieved documents
         if core_nouns:
             retrieved_tokens = set(re.findall(r"\b[a-z0-9]+\b", " ".join(c.get("text", "") for c in chunks).lower()))
             present_nouns = [cn for cn in core_nouns if any(re.search(r"\b" + re.escape(cn), t) for t in retrieved_tokens)]
             if not present_nouns:
                 return unknown_message
-
-        # Navigation boilerplate keywords that indicate raw site menus rather than informative sentences
-        nav_boilerplate_tokens = {
-            "notification", "syllabus", "circulars", "brochure", "bus routes",
-            "accreditation", "student clubs", "placements reports", "patents", "mous",
-            "apply now", "fees structure", "counselling", "greenery", "hostels counselling"
-        }
 
         # Extract sentences from retrieved chunks
         candidate_lines = []

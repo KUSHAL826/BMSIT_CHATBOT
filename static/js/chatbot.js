@@ -19,49 +19,23 @@
 
   var history = [];
   var busy = false;
-  var sessionId = localStorage.getItem("bmsit_chat_session");
-  if (!sessionId) {
-    sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
-    localStorage.setItem("bmsit_chat_session", sessionId);
-  }
+  var sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
 
-  function getStorageChatKey(sid) {
-    return "bmsit_chat_history_" + (sid || sessionId);
-  }
+  // Purge any legacy browser storage so refresh always starts completely clean
+  try {
+    Object.keys(localStorage).forEach(function (k) {
+      if (k.indexOf("bmsit_chat_") === 0) {
+        localStorage.removeItem(k);
+      }
+    });
+  } catch (e) {}
 
   function saveLocalHistory() {
-    try {
-      localStorage.setItem(getStorageChatKey(sessionId), JSON.stringify(history.slice(-MAX_HISTORY_TURNS * 2)));
-    } catch (e) {
-      console.warn("Could not save chat history to local storage:", e);
-    }
+    // History is intentionally kept purely in runtime memory for the active tab session
   }
 
   function loadLocalHistory() {
-    try {
-      var savedRaw = localStorage.getItem(getStorageChatKey(sessionId));
-      if (!savedRaw) { return; }
-      var parsed = JSON.parse(savedRaw);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        hideWelcome();
-        history = parsed;
-        parsed.forEach(function (item) {
-          var role = item.role === "assistant" ? "bot" : item.role;
-          var text = item.text || item.content || "";
-          if (role === "user") {
-            addMessage("user", renderMarkdown(text), item.meta || "");
-          } else {
-            var el = addMessage("bot", renderMarkdown(text), item.meta || "");
-            if (item.sources && item.sources.length) {
-              addCitations(el.column, item.sources);
-            }
-          }
-        });
-        scrollToEnd();
-      }
-    } catch (e) {
-      console.warn("Could not load chat history from local storage:", e);
-    }
+    // Intentionally no-op: page refresh resets to a clean fresh chat
   }
 
   /* ---------------- helpers ---------------- */
@@ -364,12 +338,7 @@
           body: JSON.stringify({ session_id: sessionId })
         }).catch(function () {});
       }
-      var oldSession = sessionId;
-      if (oldSession) {
-        localStorage.removeItem(getStorageChatKey(oldSession));
-      }
       sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
-      localStorage.setItem("bmsit_chat_session", sessionId);
 
       history = [];
       conversation.innerHTML = "";
@@ -384,7 +353,6 @@
     });
   }
 
-  loadLocalHistory();
   loadStatus();
   autoGrow();
   input.focus();
