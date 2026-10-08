@@ -19,16 +19,19 @@
 
   var history = [];
   var busy = false;
-  var STORAGE_CHAT_KEY = "bmsit_session_chat_history";
   var sessionId = localStorage.getItem("bmsit_chat_session");
   if (!sessionId) {
     sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
     localStorage.setItem("bmsit_chat_session", sessionId);
   }
 
+  function getStorageChatKey(sid) {
+    return "bmsit_chat_history_" + (sid || sessionId);
+  }
+
   function saveLocalHistory() {
     try {
-      localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(history.slice(-MAX_HISTORY_TURNS * 2)));
+      localStorage.setItem(getStorageChatKey(sessionId), JSON.stringify(history.slice(-MAX_HISTORY_TURNS * 2)));
     } catch (e) {
       console.warn("Could not save chat history to local storage:", e);
     }
@@ -36,7 +39,7 @@
 
   function loadLocalHistory() {
     try {
-      var savedRaw = localStorage.getItem(STORAGE_CHAT_KEY);
+      var savedRaw = localStorage.getItem(getStorageChatKey(sessionId));
       if (!savedRaw) { return; }
       var parsed = JSON.parse(savedRaw);
       if (Array.isArray(parsed) && parsed.length > 0) {
@@ -361,9 +364,12 @@
           body: JSON.stringify({ session_id: sessionId })
         }).catch(function () {});
       }
+      var oldSession = sessionId;
+      if (oldSession) {
+        localStorage.removeItem(getStorageChatKey(oldSession));
+      }
       sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
       localStorage.setItem("bmsit_chat_session", sessionId);
-      localStorage.removeItem(STORAGE_CHAT_KEY);
 
       history = [];
       conversation.innerHTML = "";

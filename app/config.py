@@ -87,9 +87,9 @@ _SPEC = {
     "EMBED_DAILY_TOKEN_BUDGET": ("int", 0),
 
     # Retrieval / chat
-    "TOP_K": ("int", 10),
+    "TOP_K": ("int", 6),
     "CHAT_TIMEOUT": ("int", 15),
-    "CHAT_MODELS": ("list", "gemini-3-flash-preview,gemma-4-26b-a4b-it"),
+    "CHAT_MODELS": ("list", "gemini-3.5-flash,gemma-4-26b-a4b-it,gemini-3-flash-preview"),
 
     # Supabase Vector Store
     "SUPABASE_URL": ("str", ""),

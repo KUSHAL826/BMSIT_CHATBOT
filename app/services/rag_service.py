@@ -638,62 +638,12 @@ class RAGService:
         return True
 
     # ------------------------------------------------------------------
-    # Retrieval
-    ACRONYM_SYNONYMS = {
-        "hod": ["head", "associate head", "department head", "chair", "incharge", "lead"],
-        "cluster": ["division", "section", "department", "unit", "cluster", "batch", "group"],
-        "division": ["cluster", "section", "department", "unit", "batch"],
-        "section": ["cluster", "division", "batch"],
-        "dept": ["department", "division", "branch"],
-        "department": ["dept", "division", "branch", "programs", "courses"],
-        "branch": ["branches", "courses", "programs", "departments", "engineering", "degrees", "undergraduate"],
-        "branches": ["branch", "courses", "programs", "departments", "engineering", "degrees", "undergraduate"],
-        "course": ["courses", "programs", "branches", "departments", "curriculum", "syllabus"],
-        "courses": ["course", "programs", "branches", "departments", "curriculum", "syllabus"],
-        "program": ["programs", "courses", "branches", "undergraduate", "postgraduate", "be", "btech", "mtech", "mca"],
-        "programs": ["program", "courses", "branches", "undergraduate", "postgraduate", "be", "btech", "mtech", "mca"],
-        "cse": ["computer science", "engineering"],
-        "ise": ["information science", "engineering"],
-        "ece": ["electronics", "communication", "engineering"],
-        "eee": ["electrical", "electronics", "engineering"],
-        "mech": ["mechanical", "engineering"],
-        "cv": ["civil", "engineering"],
-        "civil": ["civil engineering"],
-        "ai": ["artificial intelligence"],
-        "ml": ["machine learning"],
-        "aiml": ["artificial intelligence", "machine learning"],
-        "aids": ["artificial intelligence", "data science"],
-        "vlsi": ["vlsi system design", "mtech"],
-        "principal": ["head of institution", "director", "head of college"],
-        "fee": ["fees", "tuition", "payment", "cost", "charges", "structure"],
-        "fees": ["fee", "tuition", "payment", "cost", "charges", "structure"],
-        "hostel": ["accommodation", "dormitory", "residence", "rooms", "mess"],
-        "pmsss": ["prime minister special scholarship scheme", "jk quota", "hostel"],
-        "placement": ["placements", "recruiters", "jobs", "hiring", "offers", "packages", "ctc"],
-        "placements": ["placement", "recruiters", "jobs", "hiring", "offers", "packages", "ctc"],
-        "admission": ["admissions", "eligibility", "apply", "kcet", "comedk", "management quota"],
-        "admissions": ["admission", "eligibility", "apply", "kcet", "comedk", "management quota"],
-        "eligibility": ["criteria", "requirements", "qualification", "admission", "cutoffs"],
-        "prof": ["professor", "faculty", "doctor", "dr", "teacher"],
-        "dr": ["doctor", "professor", "faculty"],
-        "cluster": ["division", "cluster", "cse cluster", "cse division", "cluster 1", "cluster 2", "cluster 3", "cluster 4", "cluster 5"],
-        "clusters": ["divisions", "clusters", "cse clusters", "cse divisions"],
-        "division": ["cluster", "division", "cse division", "cse cluster"],
-        "divisions": ["clusters", "divisions"],
-        "hod": ["head of department", "associate head", "associate hod", "department head", "hod", "head"],
-        "head": ["hod", "head of department", "associate head", "associate hod"],
-        "associate": ["associate head", "associate hod", "associate professor"],
-    }
-
+    # Retrieval (FAISS Dense Vector + Semantic Reranker)
+    # ------------------------------------------------------------------
     @classmethod
     def _expand_synonyms(cls, query):
-        """Expands college acronyms and common terms with semantic synonyms."""
-        words = re.findall(r"\w+", (query or "").lower())
-        expansions = []
-        for word in words:
-            if word in cls.ACRONYM_SYNONYMS:
-                expansions.extend(cls.ACRONYM_SYNONYMS[word])
-        return " ".join(set(expansions))
+        """Dynamic retrieval relies on FAISS dense vector semantic space."""
+        return ""
 
     @staticmethod
     def _query_stems(query):
