@@ -90,35 +90,48 @@ class RAGService:
                 logger.info("[RAG] Supabase is enabled. Loading existing vectors from Supabase PostgreSQL...")
                 sp_chunks, sp_embeddings = supabase.fetch_all_chunks()
                 if sp_chunks and len(sp_chunks) == len(sp_embeddings):
-                    chunks = sp_chunks
+                    chunks = list(sp_chunks)
                     embeddings = sp_embeddings
                     loaded_from_supabase = True
                     logger.info("[RAG] Successfully loaded %s chunk(s) from Supabase PostgreSQL.", len(chunks))
 
-            # Fallback to local files if Supabase is disabled or empty
-            if not loaded_from_supabase:
-                chunks = read_json(self._chunks_file, default=[])
-                if not isinstance(chunks, list):
-                    chunks = []
+            # Also check local files to ensure full knowledge base coverage
+            local_chunks = read_json(self._chunks_file, default=[])
+            if not isinstance(local_chunks, list):
+                local_chunks = []
+            local_embs = None
+            if self._emb_file.exists():
+                try:
+                    loaded = np.load(str(self._emb_file))
+                    if loaded.ndim == 2 and loaded.shape[1] == self._dim and len(loaded) == len(local_chunks):
+                        local_embs = loaded.astype(np.float32)
+                except Exception as e:
+                    logger.error("[RAG] Could not read embeddings.npy: %s", e)
 
-                if self._emb_file.exists():
-                    try:
-                        loaded = np.load(str(self._emb_file))
-                        if loaded.ndim == 2 and loaded.shape[1] == self._dim:
-                            embeddings = loaded.astype(np.float32)
-                        else:
-                            logger.error(
-                                "[RAG] embeddings.npy is %s but EMBEDDING_DIM is %s. Vectors "
-                                "discarded; content will be re-embedded.", loaded.shape, self._dim,
-                            )
-                            chunks = []
-                    except Exception as e:
-                        logger.error("[RAG] Could not read embeddings.npy: %s", e)
-
-                # If local data exists and Supabase is enabled but empty, backfill local data to Supabase
-                if supabase.is_enabled and chunks and len(chunks) == len(embeddings):
-                    logger.info("[RAG] Backfilling %s local chunk(s) to empty Supabase vector store...", len(chunks))
-                    supabase.insert_chunks(chunks, embeddings)
+            if local_chunks and local_embs is not None:
+                if not chunks:
+                    chunks = local_chunks
+                    embeddings = local_embs
+                    if supabase.is_enabled:
+                        logger.info("[RAG] Backfilling %s local chunk(s) to empty Supabase vector store...", len(chunks))
+                        supabase.insert_chunks(chunks, embeddings)
+                else:
+                    # Merge any local chunks not yet in Supabase
+                    existing_ids = {c.get("chunk_id") for c in chunks if c.get("chunk_id")}
+                    to_append_c = []
+                    to_append_v = []
+                    for idx, lc in enumerate(local_chunks):
+                        cid = lc.get("chunk_id")
+                        if cid and cid not in existing_ids:
+                            to_append_c.append(lc)
+                            to_append_v.append(local_embs[idx])
+                            existing_ids.add(cid)
+                    if to_append_c:
+                        chunks.extend(to_append_c)
+                        embeddings = np.vstack([embeddings, np.array(to_append_v, dtype=np.float32)])
+                        logger.info("[RAG] Merged %s local chunks into active index.", len(to_append_c))
+                        if supabase.is_enabled:
+                            supabase.insert_chunks(to_append_c, np.array(to_append_v, dtype=np.float32))
 
             repaired = False
             if len(chunks) != len(embeddings):
@@ -235,12 +248,18 @@ class RAGService:
         key_digest = hashlib.md5(str(key).encode("utf-8")).hexdigest()[:10]
 
         chunks = []
+        now_ts = datetime.now().isoformat()
         for ordinal, piece in enumerate(pieces, start=1):
             # The text digest makes the id specific to this revision of the
             # content. Re-chunking identical text yields the same id (idempotent),
             # while edited text yields a new one, so the registry's recorded ids
             # always identify exactly the vectors that are live.
             text_digest = hashlib.md5(piece["text"].encode("utf-8")).hexdigest()[:8]
+            meta = dict(metadata_extra or {})
+            if "updated_at" not in meta:
+                meta["updated_at"] = now_ts
+            if "created_at" not in meta:
+                meta["created_at"] = now_ts
             chunks.append({
                 "chunk_id": f"{source_id}::{key_digest}::{ordinal}::{text_digest}",
                 "source_id": source_id,
@@ -250,7 +269,9 @@ class RAGService:
                 "text": piece["text"],
                 "tokens": piece["tokens"],
                 "context_header": context_header or "",
-                "metadata": metadata_extra or {},
+                "metadata": meta,
+                "updated_at": meta["updated_at"],
+                "created_at": meta["created_at"],
             })
         return chunks
 
@@ -642,7 +663,7 @@ class RAGService:
         "aiml": ["artificial intelligence", "machine learning"],
         "aids": ["artificial intelligence", "data science"],
         "vlsi": ["vlsi system design", "mtech"],
-        "principal": ["head of institution", "director", "mohan babu", "vanarotti"],
+        "principal": ["head of institution", "director", "head of college"],
         "fee": ["fees", "tuition", "payment", "cost", "charges", "structure"],
         "fees": ["fee", "tuition", "payment", "cost", "charges", "structure"],
         "hostel": ["accommodation", "dormitory", "residence", "rooms", "mess"],
@@ -654,6 +675,13 @@ class RAGService:
         "eligibility": ["criteria", "requirements", "qualification", "admission", "cutoffs"],
         "prof": ["professor", "faculty", "doctor", "dr", "teacher"],
         "dr": ["doctor", "professor", "faculty"],
+        "cluster": ["division", "cluster", "cse cluster", "cse division", "cluster 1", "cluster 2", "cluster 3", "cluster 4", "cluster 5"],
+        "clusters": ["divisions", "clusters", "cse clusters", "cse divisions"],
+        "division": ["cluster", "division", "cse division", "cse cluster"],
+        "divisions": ["clusters", "divisions"],
+        "hod": ["head of department", "associate head", "associate hod", "department head", "hod", "head"],
+        "head": ["hod", "head of department", "associate head", "associate hod"],
+        "associate": ["associate head", "associate hod", "associate professor"],
     }
 
     @classmethod

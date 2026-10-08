@@ -19,10 +19,46 @@
 
   var history = [];
   var busy = false;
+  var STORAGE_CHAT_KEY = "bmsit_session_chat_history";
   var sessionId = localStorage.getItem("bmsit_chat_session");
   if (!sessionId) {
     sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
     localStorage.setItem("bmsit_chat_session", sessionId);
+  }
+
+  function saveLocalHistory() {
+    try {
+      localStorage.setItem(STORAGE_CHAT_KEY, JSON.stringify(history.slice(-MAX_HISTORY_TURNS * 2)));
+    } catch (e) {
+      console.warn("Could not save chat history to local storage:", e);
+    }
+  }
+
+  function loadLocalHistory() {
+    try {
+      var savedRaw = localStorage.getItem(STORAGE_CHAT_KEY);
+      if (!savedRaw) { return; }
+      var parsed = JSON.parse(savedRaw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        hideWelcome();
+        history = parsed;
+        parsed.forEach(function (item) {
+          var role = item.role === "assistant" ? "bot" : item.role;
+          var text = item.text || item.content || "";
+          if (role === "user") {
+            addMessage("user", renderMarkdown(text), item.meta || "");
+          } else {
+            var el = addMessage("bot", renderMarkdown(text), item.meta || "");
+            if (item.sources && item.sources.length) {
+              addCitations(el.column, item.sources);
+            }
+          }
+        });
+        scrollToEnd();
+      }
+    } catch (e) {
+      console.warn("Could not load chat history from local storage:", e);
+    }
   }
 
   /* ---------------- helpers ---------------- */
@@ -271,11 +307,14 @@
 
         addCitations(placeholder.column, data.sources);
 
-        history.push({ role: "user", text: text });
-        history.push({ role: "assistant", text: reply });
+        var userMeta = timeLabel();
+        var aiMeta = timeLabel() + (data.guardrail_triggered ? " · policy filter" : "");
+        history.push({ role: "user", text: text, meta: userMeta });
+        history.push({ role: "assistant", text: reply, meta: aiMeta, sources: data.sources });
         if (history.length > MAX_HISTORY_TURNS * 2) {
           history = history.slice(-MAX_HISTORY_TURNS * 2);
         }
+        saveLocalHistory();
       })
       .catch(function (error) {
         placeholder.wrapper.className = "message system";
@@ -324,6 +363,7 @@
       }
       sessionId = "sess_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
       localStorage.setItem("bmsit_chat_session", sessionId);
+      localStorage.removeItem(STORAGE_CHAT_KEY);
 
       history = [];
       conversation.innerHTML = "";
@@ -338,7 +378,7 @@
     });
   }
 
-
+  loadLocalHistory();
   loadStatus();
   autoGrow();
   input.focus();

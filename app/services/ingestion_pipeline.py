@@ -201,13 +201,19 @@ def run_website_delta_ingestion(is_scheduled=False):
             if not item:
                 continue
             meta = item.get("metadata") or {}
-            title = item.get("title") or url
+            now_ts = StorageService._now_ist_str()
             chunks_by_url[url] = rag.chunk_text(
                 text=item["text"],
                 source_id=source_id,
                 source_name=title,
                 source_type="website",
-                metadata_extra={"url": meta.get("url", url), "title": title, "type": "web"},
+                metadata_extra={
+                    "url": meta.get("url", url),
+                    "title": title,
+                    "type": "web",
+                    "updated_at": now_ts,
+                    "created_at": meta.get("created_at") or now_ts,
+                },
                 item_key=url,
                 context_header=f"BMSIT page: {title} ({meta.get('url', url)})",
             )

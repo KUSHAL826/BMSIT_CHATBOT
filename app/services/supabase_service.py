@@ -102,6 +102,7 @@ class SupabaseService:
             elif len(vec) > dim:
                 vec = vec[:dim]
 
+            row_meta = row.get("metadata") if isinstance(row.get("metadata"), dict) else {}
             chunk = {
                 "chunk_id": row.get("id") or row.get("chunk_id"),
                 "source_id": row.get("source_id", ""),
@@ -111,7 +112,9 @@ class SupabaseService:
                 "text": row.get("text", ""),
                 "tokens": int(row.get("tokens") or 0),
                 "context_header": row.get("context_header", ""),
-                "metadata": row.get("metadata") if isinstance(row.get("metadata"), dict) else {},
+                "metadata": row_meta,
+                "updated_at": row_meta.get("updated_at") or row.get("created_at") or "",
+                "created_at": row_meta.get("created_at") or row.get("created_at") or "",
                 "embed_provider": row.get("embed_provider") or "gemini:gemini-embedding-001",
                 "content_hash": row.get("content_hash", ""),
             }

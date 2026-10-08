@@ -17,6 +17,7 @@ import logging
 import math
 import os
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -102,6 +103,14 @@ class RerankerService:
         ]
         stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_terms]
 
+        SYNONYM_EXPANSIONS = {
+            "cluster": ["division", "cluster"],
+            "division": ["cluster", "division"],
+            "hod": ["head", "associate head", "associate hod", "hod"],
+            "head": ["hod", "head", "associate head"],
+            "associate": ["associate", "associate head", "associate professor"],
+        }
+
         scored_chunks = []
         for chunk in chunks:
             text = chunk.get("text", "")
@@ -117,12 +126,21 @@ class RerankerService:
                 phrase = " ".join(raw_terms[:4])
                 if phrase in text_lower:
                     exact_phrase_bonus = 0.40
+                else:
+                    for c_num in range(1, 6):
+                        c_str = f"cluster {c_num}"
+                        if (c_str in phrase or f"{c_str} hod" in phrase) and (f"division {c_num}" in text_lower or c_str in text_lower):
+                            exact_phrase_bonus = 0.50
+                            break
 
-            # 2. Key stem density & coverage
+            # 2. Key stem density & coverage with institutional synonyms
             matched_stems = set()
             term_occurrences = 0
             for st in stems:
-                matches = len(re.findall(r"\b" + re.escape(st), text_lower))
+                st_synonyms = SYNONYM_EXPANSIONS.get(st, [st])
+                matches = 0
+                for syn in st_synonyms:
+                    matches += len(re.findall(r"\b" + re.escape(syn), text_lower))
                 if matches > 0:
                     matched_stems.add(st)
                     term_occurrences += matches
@@ -155,12 +173,39 @@ class RerankerService:
 
             entry = dict(chunk)
             entry["rerank_score"] = round(rerank_score, 4)
-            # Update primary score to reflect reranked ordering
             entry["score"] = round(rerank_score, 4)
             scored_chunks.append(entry)
 
-        # Sort by rerank score descending
-        scored_chunks.sort(key=lambda c: c["rerank_score"], reverse=True)
+        def _get_chunk_timestamp(c):
+            raw = c.get("updated_at") or (c.get("metadata") or {}).get("updated_at") or c.get("created_at") or ""
+            if not raw or not isinstance(raw, str):
+                return 0.0
+            for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+                try:
+                    return datetime.strptime(raw[:19], fmt).timestamp()
+                except Exception:
+                    continue
+            try:
+                return datetime.fromisoformat(raw.replace("Z", "+00:00")).timestamp()
+            except Exception:
+                return 0.0
+
+        # Calculate max timestamp among candidates that match the query
+        candidate_timestamps = [_get_chunk_timestamp(c) for c in scored_chunks if c.get("rerank_score", 0) > 0.2]
+        max_ts = max(candidate_timestamps) if candidate_timestamps else 0.0
+
+        for entry in scored_chunks:
+            c_ts = _get_chunk_timestamp(entry)
+            entry["_ts"] = c_ts
+            # If 2 or more chunks match the entity (e.g. HoD, associate head, fees), give a recency boost to the latest chunk
+            if max_ts > 0 and c_ts >= (max_ts - 3600) and entry["rerank_score"] > 0.25:
+                entry["rerank_score"] = round(entry["rerank_score"] + 0.08, 4)
+                entry["score"] = entry["rerank_score"]
+
+        # Sort by rerank score descending, breaking ties with recency timestamp
+        scored_chunks.sort(key=lambda c: (c["rerank_score"], c.get("_ts", 0.0)), reverse=True)
+        for c in scored_chunks:
+            c.pop("_ts", None)
         return scored_chunks
 
     def _llm_rerank(
@@ -171,56 +216,62 @@ class RerankerService:
         api_key: str
     ) -> Optional[List[Dict[str, Any]]]:
         """
-        Fast cross-attention reranker via Gemini.
-        Returns candidate indices sorted from most relevant to least relevant.
+        Fast cross-attention reranker via Gemini with model fallback and recency preference.
         """
         items_payload = []
         for idx, c in enumerate(candidates):
             src = c.get("source_name", "BMSIT")
+            upd = c.get("updated_at") or (c.get("metadata") or {}).get("updated_at") or "recent"
             snippet = re.sub(r"\s+", " ", c.get("text", "")[:280]).strip()
-            items_payload.append(f"[{idx}] Source: {src} | Text: {snippet}")
+            items_payload.append(f"[{idx}] Source: {src} | Updated: {upd} | Text: {snippet}")
 
         items_text = "\n".join(items_payload)
         prompt = f"""You are a precise passage reranker for a college information search engine.
 Question: "{query}"
 
 Evaluate each candidate passage below and rank them by how directly and accurately they answer or provide facts for the question.
+Important: If two passages contain conflicting or duplicate information for the same position, person, department (e.g., HoD of CSE), or policy, prioritize the latest passage (indicated by Updated timestamp).
+
 Passages:
 {items_text}
 
 Output JSON ONLY in this format:
 {{"ranked_indices": [most_relevant_index, second_index, ...]}}"""
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.0,
-                "responseMimeType": "application/json",
-                "maxOutputTokens": 100
+        models = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"]
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "responseMimeType": "application/json",
+                    "maxOutputTokens": 100
+                }
             }
-        }
 
-        resp = requests.post(url, json=payload, timeout=8)
-        if resp.status_code == 200:
-            res_json = resp.json()
-            candidates_out = res_json.get("candidates", [])
-            if candidates_out:
-                parts = candidates_out[0].get("content", {}).get("parts", [])
-                if parts and parts[0].get("text"):
-                    parsed = json.loads(parts[0]["text"])
-                    ranked_indices = parsed.get("ranked_indices", [])
-                    if isinstance(ranked_indices, list) and ranked_indices:
-                        result = []
-                        seen = set()
-                        for idx in ranked_indices:
-                            if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen:
-                                seen.add(idx)
-                                item = dict(candidates[idx])
-                                # Higher rank gets boosted score
-                                item["rerank_score"] = round(1.0 - (len(result) * 0.05), 3)
-                                item["score"] = item["rerank_score"]
-                                result.append(item)
-                        return result
+            try:
+                resp = requests.post(url, json=payload, timeout=6)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    candidates_out = res_json.get("candidates", [])
+                    if candidates_out:
+                        parts = candidates_out[0].get("content", {}).get("parts", [])
+                        if parts and parts[0].get("text"):
+                            parsed = json.loads(parts[0]["text"])
+                            ranked_indices = parsed.get("ranked_indices", [])
+                            if isinstance(ranked_indices, list) and ranked_indices:
+                                result = []
+                                seen = set()
+                                for idx in ranked_indices:
+                                    if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen:
+                                        seen.add(idx)
+                                        item = dict(candidates[idx])
+                                        item["rerank_score"] = round(1.0 - (len(result) * 0.05), 3)
+                                        item["score"] = item["rerank_score"]
+                                        result.append(item)
+                                return result
+            except Exception:
+                continue
 
         return None

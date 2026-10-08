@@ -70,6 +70,9 @@ class WebsiteScraper:
         # Targeted BMSIT URLs with real content
         priority_paths = [
             "",
+            "/academic-council.php",
+            "/administration.php",
+            "/governing-body.php",
             "/admissions.php",
             "/admission-query.php",
             "/fee-structure.php",
@@ -108,6 +111,7 @@ class WebsiteScraper:
             if old_u and not any(q[0] == old_u for q in queue):
                 queue.append((old_u, 0))
 
+        queued_urls = set(q[0] for q in queue)
         scraped_pages = {}
         detected_changes = []
 
@@ -136,15 +140,16 @@ class WebsiteScraper:
                 scraped_pages[url] = page_data
                 scraper_status.pages_scraped = len(scraped_pages)
 
-                # Discover new links if depth allows
-                if depth < self.max_depth and len(visited) + len(queue) < self.max_pages:
+                # Discover new links dynamically if depth allows
+                if depth < self.max_depth and len(queue) < 1000:
                     for link in page_data["links"]:
                         clean_link = link.split("#")[0].rstrip("/")
-                        if clean_link and clean_link not in visited and clean_link not in [q[0] for q in queue]:
+                        if clean_link and clean_link not in visited and clean_link not in queued_urls:
                             # Only crawl same domain
                             l_domain = urlparse(clean_link).netloc
-                            if l_domain == self.domain or not l_domain:
+                            if l_domain == self.domain or not l_domain or l_domain.endswith("." + self.domain):
                                 queue.append((clean_link, depth + 1))
+                                queued_urls.add(clean_link)
 
                 # Polite delay
                 time.sleep(Config.SCRAPE_DELAY)
@@ -343,7 +348,7 @@ class WebsiteScraper:
                 ".sidebar", "#sidebar", ".footer", ".footer-bg", ".footer-area", 
                 ".bottom-footer", "#footer", "#header", ".navbar", ".dropdown-menu", 
                 ".modal", ".breadcrumbs", ".social-icons", ".quick-links", ".marquee",
-                ".parentHorizontalTab", ".for-mobile-shift"
+                ".for-mobile-shift"
             ]
             for sel in boilerplate_selectors:
                 for el in soup.select(sel):

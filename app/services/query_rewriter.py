@@ -44,6 +44,15 @@ BMSIT_CANONICAL_TERMS = {
     "comedk": "COMEDK entrance quota and counseling",
     "kcet": "Karnataka Common Entrance Test (KCET)",
     "hod": "Head of Department (HoD / Professor & Head)",
+    "associate hod": "Associate Head / HoD of CSE Division or Cluster",
+    "associate head": "Associate Head / HoD of CSE Division or Cluster",
+    "cluster": "Cluster / Division in CSE Department",
+    "clusters": "Clusters / Divisions in CSE Department",
+    "cluster 1": "CSE Cluster 1 Division 1 Associate Head HoD",
+    "cluster 2": "CSE Cluster 2 Division 2 Associate Head HoD",
+    "cluster 3": "CSE Cluster 3 Division 3 Associate Head HoD",
+    "cluster 4": "CSE Cluster 4 Division 4 Associate Head HoD",
+    "cluster 5": "CSE Cluster 5 Division 5 Associate Head HoD",
     "principal": "Principal / Head of Institution",
     "hostel": "Hostel Facilities, accommodation, room types, and fee structure",
     "placement": "Placements, packages, recruiters, and statistics",
@@ -121,24 +130,29 @@ Guidelines:
 {history_context}Latest User Question: {query}
 Optimized Search Query:"""
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}],
-            "generationConfig": {
-                "temperature": 0.0,
-                "maxOutputTokens": 60
+        models = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"]
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+                "generationConfig": {
+                    "temperature": 0.0,
+                    "maxOutputTokens": 60
+                }
             }
-        }
-        resp = requests.post(url, json=payload, timeout=8)
-        if resp.status_code == 200:
-            res_json = resp.json()
-            candidates = res_json.get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts and parts[0].get("text"):
-                    result = parts[0]["text"].strip().strip('"\'')
-                    if len(result.splitlines()) == 1 and len(result) < 200:
-                        return result
+            try:
+                resp = requests.post(url, json=payload, timeout=5)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    candidates = res_json.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and parts[0].get("text"):
+                            result = parts[0]["text"].strip().strip('"\'')
+                            if len(result.splitlines()) == 1 and len(result) < 200:
+                                return result
+            except Exception:
+                continue
 
         return None
 
@@ -152,6 +166,15 @@ Optimized Search Query:"""
         """
         rewritten = query
         query_lower = query.lower()
+
+        # Specific cluster handling: in BMSIT CSE department, clusters correspond to divisions
+        for c_idx in range(1, 6):
+            if f"cluster {c_idx}" in query_lower or f"cluster-{c_idx}" in query_lower or f"division {c_idx}" in query_lower:
+                rewritten = f"{rewritten} CSE Division {c_idx} Cluster {c_idx} Associate Head HoD"
+                break
+
+        if ("associate hod" in query_lower or "associate head" in query_lower) and "cluster" not in query_lower and "division" not in query_lower:
+            rewritten = f"{rewritten} Associate Head Division Cluster CSE"
 
         # Check for pronouns or short follow-ups needing context
         referential_words = ["he", "she", "him", "her", "it", "its", "they", "them", "this", "that", "more", "details"]
@@ -176,7 +199,6 @@ Optimized Search Query:"""
         for alias, full_name in BMSIT_CANONICAL_TERMS.items():
             pattern = r"\b" + re.escape(alias) + r"\b"
             if re.search(pattern, query_lower) and alias in ["cse", "ise", "ece", "eee", "mech", "aiml", "pmsss", "hod"]:
-                # Append canonical expansion to ensure dense vector and lexical alignment
                 if full_name.lower() not in rewritten.lower():
                     rewritten = f"{rewritten} ({full_name})"
 
