@@ -47,10 +47,13 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
      * "hostel" / "accommodation" / "rooms" / "mess"
    - When relevant information is present in the context, synthesize and deliver a complete, clear, and well-structured answer using markdown bullets, bold highlights, or tables.
 
-3. GRACEFUL MISSING INFORMATION PROTOCOL:
-   - If—and ONLY if—the requested specific detail is genuinely ABSENT from the provided knowledge base context:
-     * Do NOT guess or invent facts.
-     * State clearly and courteously that the verified knowledge base does not currently contain this specific detail.
+3. GRACEFUL MISSING INFORMATION PROTOCOL (STRICT REFUSAL RULE):
+   - If—and ONLY if—the requested specific detail, entity, club, center, or facility is genuinely ABSENT from the provided knowledge base context:
+     * Do NOT guess, extrapolate, or invent facts.
+     * ZERO GENERIC SUBSTITUTION: Never substitute unrelated entities just because they share a generic word (e.g. do NOT output general "research centers" when asked about "krishi center").
+     * ZERO RAW NAVIGATION DUMPS: Never output raw website navigation bar link lists, menu items, or slogans (e.g. "Notification Syllabus BICEP...") as an answer. If an entity is only listed as a bare link without explanatory text, treat it as lacking verified documentation.
+     * State clearly and courteously:
+       "As of now, I don't have verified information regarding this in the BMSIT knowledge base. Please refer to https://bmsit.ac.in or contact the college directly:"
      * Provide the official college contact points:
        • Email: admissions@bmsit.in / principal@bmsit.in
        • Phone: +91-80-68730444 / +91-80-68730424
@@ -300,6 +303,56 @@ class GeminiService:
                     "session_id": session_id
                 }
 
+        # Fast Grounding Guard: If user asks about a specific entity absent from all retrieved chunks, refuse immediately
+        stop_words = {
+            "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
+            "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit",
+            "bms", "college", "institute", "campus", "info", "information", "him", "her", "his",
+            "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
+            "who", "whom", "whose", "have", "has", "had", "give", "list", "please"
+        }
+        generic_words = {
+            "facilitie", "facility", "facilities", "provide", "provided", "available",
+            "detail", "details", "info", "information", "campus", "college", "institute",
+            "student", "students", "tell", "give", "list", "have", "has", "get", "club", "clubs",
+            "center", "centers", "centre", "centres", "cell", "cells", "dept", "department", "departments",
+            "lab", "labs", "laboratory", "laboratories", "committee", "office", "branch", "branches",
+            "course", "courses", "program", "programs", "admission", "admissions", "fee", "fees",
+            "hostel", "hostels", "placement", "placements", "block", "blocks", "building", "hall",
+            "offer", "offered", "study", "studies", "educate", "education", "undergraduate", "postgraduate",
+            "degree", "degrees", "academic", "academics", "seat", "seats", "intake"
+        }
+        q_raw_words = [
+            w.lower() for w in re.findall(r"\w+", user_message)
+            if w.lower() not in stop_words and (len(w) > 2 or w.isdigit())
+        ]
+        q_stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in q_raw_words]
+        q_distinguishing = [
+            s for s in q_stems
+            if s not in {"tell", "about", "what", "who", "which", "give", "list", "bmsit", "bms", "college", "institute", "campus", "engineering"}
+        ]
+        q_core_nouns = [s for s in q_distinguishing if s not in generic_words and s not in {"engineering"}]
+
+        is_courses_query = any(k in user_message.lower() for k in ["course", "branch", "program", "stream", "department", "degree"])
+        all_text = " ".join(c.get("text", "") for c in retrieved_chunks).lower()
+        if not is_courses_query and q_core_nouns and not any(re.search(r"\b" + re.escape(cn), all_text) for cn in q_core_nouns):
+            subj_title = " ".join(q_distinguishing).title() if q_distinguishing else "this topic"
+            missing_reply = (
+                f"As of now, I don't have verified information regarding **{subj_title}** in the BMSIT knowledge base. "
+                "Please refer to [https://bmsit.ac.in](https://bmsit.ac.in) or contact the college directly:\n"
+                "• **Email**: `admissions@bmsit.in` / `principal@bmsit.in`\n"
+                "• **Phone**: +91-80-68730444 / +91-80-68730424\n"
+                "• **Website**: [https://bmsit.ac.in](https://bmsit.ac.in)\n"
+                "• **Address**: Doddaballapur Main Road, Avalahalli, Yelahanka, Bengaluru - 560064"
+            )
+            history_mgr.append_turn(session_id, user_message, missing_reply)
+            return {
+                "reply": missing_reply,
+                "sources": [],
+                "guardrail_triggered": False,
+                "session_id": session_id
+            }
+
         # Build context string from top 6 reranked chunks
         context_parts = []
         sources = []
@@ -382,9 +435,15 @@ USER QUESTION:
 
 ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTLY on the BMSIT context above):"""
 
-        # Priority list of verified, active generation models
+        # Priority list of verified, active generation models, honoring GEMINI_MODEL
         configured = [m.strip() for m in (Config.CHAT_MODELS or []) if m.strip()]
-        models_to_try = configured or ["gemini-3-flash-preview", "gemma-4-26b-a4b-it"]
+        primary_model = (getattr(Config, "GEMINI_MODEL", "") or "").strip()
+        models_to_try = []
+        if primary_model and primary_model not in models_to_try:
+            models_to_try.append(primary_model)
+        for m in (configured or ["gemini-3.5-flash", "gemini-3-flash-preview"]):
+            if m not in models_to_try:
+                models_to_try.append(m)
 
         last_err = None
         for m in models_to_try:
@@ -433,9 +492,42 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
         Laser focused on the specific queried topic without extraneous departments.
         Adheres to adaptive length constraints (e.g. 'in one line', 'briefly').
         """
+        q_lower = query.lower()
+
+        # Tokenize query into meaningful search terms
+        stop_words = {
+            "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
+            "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit",
+            "bms", "college", "institute", "campus", "info", "information", "him", "her", "his",
+            "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
+            "who", "whom", "whose", "have", "has", "had", "give", "list", "please"
+        }
+        raw_words = [
+            w.lower() for w in re.findall(r"\w+", query)
+            if w.lower() not in stop_words and (len(w) > 2 or w.isdigit())
+        ]
+        stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_words]
+        distinguishing_stems = [
+            s for s in stems
+            if s not in {"tell", "about", "what", "who", "which", "give", "list", "bmsit", "bms", "college", "institute", "campus", "engineering"}
+        ]
+        generic_words = {
+            "facilitie", "facility", "facilities", "provide", "provided", "available",
+            "detail", "details", "info", "information", "campus", "college", "institute",
+            "student", "students", "tell", "give", "list", "have", "has", "get", "club", "clubs",
+            "center", "centers", "centre", "centres", "cell", "cells", "dept", "department", "departments",
+            "lab", "labs", "laboratory", "laboratories", "committee", "office", "branch", "branches",
+            "course", "courses", "program", "programs", "admission", "admissions", "fee", "fees",
+            "hostel", "hostels", "placement", "placements", "block", "blocks", "building", "hall",
+            "offer", "offered", "study", "studies", "educate", "education", "undergraduate", "postgraduate",
+            "degree", "degrees", "academic", "academics", "seat", "seats", "intake"
+        }
+        core_nouns = [s for s in distinguishing_stems if s not in generic_words and s not in {"engineering"}]
+
+        subject_display = " ".join(distinguishing_stems).title() if distinguishing_stems else "this topic"
         unknown_message = (
-            "As of now, I don't have verified information regarding this in the BMSIT knowledge base. "
-            "Please contact the college directly for details:\n"
+            f"As of now, I don't have verified information regarding **{subject_display}** in the BMSIT knowledge base. "
+            "Please refer to [https://bmsit.ac.in](https://bmsit.ac.in) or contact the college directly:\n"
             "• **Email**: `admissions@bmsit.in` / `principal@bmsit.in`\n"
             "• **Phone**: +91-80-68730444 / +91-80-68730424\n"
             "• **Website**: [https://bmsit.ac.in](https://bmsit.ac.in)\n"
@@ -444,8 +536,6 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
 
         if not chunks:
             return unknown_message
-
-        q_lower = query.lower()
 
         # Length constraint flags
         one_line_requested = bool(re.search(r"\b(one\s+line|single\s+sentence|in\s+short)\b", q_lower))
@@ -484,37 +574,20 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
                         sections.append("**Postgraduate Programs (M.Tech / MBA / MCA):**\n" + "\n".join(f"* {p}" for p in pg_progs))
                     return f"Based on BMSIT verified official records (Admissions):\n\n" + "\n\n".join(sections)
 
-        # Tokenize query into meaningful search terms
-        stop_words = {
-            "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
-            "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit",
-            "bms", "college", "institute", "campus", "info", "information", "him", "her", "his",
-            "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
-            "who", "whom", "whose", "have", "has", "had", "give", "list", "please"
-        }
-        raw_words = [
-            w.lower() for w in re.findall(r"\w+", query)
-            if w.lower() not in stop_words and (len(w) > 2 or w.isdigit())
-        ]
-        stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_words]
-        distinguishing_stems = [
-            s for s in stems
-            if s not in {"tell", "about", "what", "who", "which", "give", "list", "bmsit", "bms", "college", "institute", "campus", "engineering"}
-        ]
-        generic_words = {
-            "facilitie", "facility", "facilities", "provide", "provided", "available",
-            "detail", "details", "info", "information", "campus", "college", "institute",
-            "student", "students", "tell", "give", "list", "have", "has", "get", "club", "clubs"
-        }
-        core_nouns = [s for s in distinguishing_stems if s not in generic_words and s not in {"engineering"}]
-
-        # If the user asked about specific core nouns (e.g. helicopter, horse, library, idea lab),
+        # If the user asked about specific core nouns (e.g. helicopter, krishi, idea lab),
         # verify that at least one core noun appears in the retrieved documents before synthesizing
         if core_nouns:
             retrieved_tokens = set(re.findall(r"\b[a-z0-9]+\b", " ".join(c.get("text", "") for c in chunks).lower()))
             present_nouns = [cn for cn in core_nouns if any(re.search(r"\b" + re.escape(cn), t) for t in retrieved_tokens)]
             if not present_nouns:
                 return unknown_message
+
+        # Navigation boilerplate keywords that indicate raw site menus rather than informative sentences
+        nav_boilerplate_tokens = {
+            "notification", "syllabus", "circulars", "brochure", "bus routes",
+            "accreditation", "student clubs", "placements reports", "patents", "mous",
+            "apply now", "fees structure", "counselling", "greenery", "hostels counselling"
+        }
 
         # Extract sentences from retrieved chunks
         candidate_lines = []
@@ -524,6 +597,12 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
             sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", raw_text) if len(s.strip()) > 15]
             for sentence in sentences:
                 s_lower = sentence.lower()
+
+                # Filter out raw menu / navigation header fragments
+                nav_hits = sum(1 for nav in nav_boilerplate_tokens if nav in s_lower)
+                if nav_hits >= 2:
+                    continue
+
                 matches = sum(1 for st in stems if (st in s_lower or (len(st) >= 4 and st[:4] in s_lower)))
 
                 # Strict Core-Entity Guard: Sentence or source must match the query's core nouns

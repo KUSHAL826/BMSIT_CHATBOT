@@ -64,10 +64,10 @@ _SPEC = {
     "SCHEDULE_TIMEZONE": ("str", "Asia/Kolkata"),
 
     # Chunking
-    "CHUNK_TARGET_TOKENS": ("int", 450),
-    "CHUNK_MAX_TOKENS": ("int", 550),
+    "CHUNK_TARGET_TOKENS": ("int", 350),
+    "CHUNK_MAX_TOKENS": ("int", 500),
     "CHUNK_MIN_TOKENS": ("int", 60),
-    "CHUNK_OVERLAP_TOKENS": ("int", 30),
+    "CHUNK_OVERLAP_TOKENS": ("int", 60),
 
     # Embeddings
     "EMBED_MODEL": ("str", "gemini-embedding-001"),
@@ -89,6 +89,7 @@ _SPEC = {
     # Retrieval / chat
     "TOP_K": ("int", 6),
     "CHAT_TIMEOUT": ("int", 15),
+    "GEMINI_MODEL": ("str", "gemini-3.5-flash"),
     "CHAT_MODELS": ("list", "gemini-3.5-flash,gemini-3-flash-preview"),
 
     # Supabase Vector Store

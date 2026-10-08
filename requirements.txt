@@ -32,6 +32,7 @@ APScheduler>=3.11,<4
 # LangChain Chat History & Orchestration
 langchain>=1.0,<2
 langchain-core>=1.0,<2
+langchain-text-splitters>=1.0,<2
 
 # Config
 python-dotenv>=1.0,<2

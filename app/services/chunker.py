@@ -81,13 +81,19 @@ def _atoms(text):
     return units
 
 
+try:
+    from langchain_text_splitters import RecursiveCharacterTextSplitter
+except ImportError:
+    RecursiveCharacterTextSplitter = None
+
+
 def split_into_token_chunks(text, target_tokens=None, max_tokens=None, overlap_tokens=None,
                             min_tokens=None):
     """
-    Splits text into chunks of roughly `target_tokens` (default 250-300).
+    Splits text into chunks using LangChain RecursiveCharacterTextSplitter
+    sized for production embedding models with calibrated semantic overlap.
 
-    Returns a list of {"text": str, "tokens": int}. The last chunk is merged
-    backwards if it is too small to be useful on its own.
+    Returns a list of {"text": str, "tokens": int}.
     """
     if not text or not text.strip():
         return []
@@ -97,6 +103,32 @@ def split_into_token_chunks(text, target_tokens=None, max_tokens=None, overlap_t
     overlap = overlap_tokens if overlap_tokens is not None else Config.CHUNK_OVERLAP_TOKENS
     floor = min_tokens or Config.CHUNK_MIN_TOKENS
 
+    # Primary: Production LangChain RecursiveCharacterTextSplitter
+    if RecursiveCharacterTextSplitter is not None:
+        chunk_size_chars = int(ceiling * 3.8)
+        chunk_overlap_chars = int(overlap * 3.8)
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=chunk_size_chars,
+            chunk_overlap=chunk_overlap_chars,
+            separators=["\n\n", "\n", ". ", "; ", " ", ""]
+        )
+        splits = splitter.split_text(text)
+        result = []
+        for s in splits:
+            body = s.strip()
+            if not body:
+                continue
+            toks = count_tokens(body)
+            if result and toks < floor:
+                # Merge small trailing fragment backward
+                merged = result[-1]["text"] + " " + body
+                result[-1] = {"text": merged, "tokens": count_tokens(merged)}
+                continue
+            result.append({"text": body, "tokens": toks})
+        if result:
+            return result
+
+    # Robust Fallback: Sentence-atomic sliding window with overlap
     units = _atoms(text)
     if not units:
         return []
@@ -107,8 +139,6 @@ def split_into_token_chunks(text, target_tokens=None, max_tokens=None, overlap_t
     for unit in units:
         unit_tokens = count_tokens(unit)
 
-        # Closing the chunk here would exceed the ceiling, or we already met the
-        # target: emit and start a new one carrying a little overlap.
         if current and (current_tokens + unit_tokens > ceiling or current_tokens >= target):
             chunks.append((list(current), current_tokens))
             carry, carry_tokens = [], 0
@@ -132,7 +162,6 @@ def split_into_token_chunks(text, target_tokens=None, max_tokens=None, overlap_t
         if not body:
             continue
         if result and tokens < floor:
-            # Too small to stand alone: fold it into the previous chunk.
             merged = result[-1]["text"] + " " + body
             result[-1] = {"text": merged, "tokens": count_tokens(merged)}
             continue
