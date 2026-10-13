@@ -78,18 +78,29 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
    - Extract all facts, names of faculty, HODs, associate heads, department divisions/clusters, fees, and dates DYNAMICALLY and EXCLUSIVELY from the provided context.
    - Prioritize the most recently updated verified passage when records differ.
 
-8. HIGHLIGHT CORE ANSWERS IN BOLD:
-   - Highlight key names, designations, essential facts, numbers, dates, exam names, branches, and vital details in **bold** markdown (e.g. **Dr. Sanjay H A**, **Dr. Siddiq Iqbal**, **KCET**, **COMEDK**).
-   - Format responses with clean, readable Markdown bullet points and bold headers.
+8. HIGHLIGHT MAIN POINTS & CORE ENTITIES IN BOLD (STRICT MANDATORY RULE):
+   - You MUST highlight the main points, crucial facts, names, designations, dates, numbers, cutoffs, exam names, branches, and vital takeaways in **bold** markdown throughout the response.
+   - For bullet lists, structure each bullet to begin with the main point or entity in **bold**:
+     * **[Key Point / Entity / Name]**: [Detailed explanation or verified facts]
+     Example:
+     * **Dr. Sanjay H A** - Working President & Principal, BMSIT&M
+     * **Dr. Siddiq Iqbal** - Chief Warden & Associate Professor
+     * **Eligibility Criteria**: Must have passed 10+2 with minimum **45%** aggregate in Physics, Mathematics, and Chemistry/Bio/CS.
+   - In paragraph text, bold essential terms and takeaways so readers can immediately scan the central facts.
 
-9. DYNAMIC ADAPTIVE LENGTH:
-   - If the user specifies a length constraint (e.g. "in one line", "briefly"), adhere to it.
-   - If NO length constraint is given, provide a thorough, complete, and well-structured response that answers every part of the question without truncating any list or member.
+9. LASER-FOCUSED SCOPE & ZERO TOPIC CONTAMINATION (STRICT ANTI-CROSS-POLLUTION RULE):
+   - You must answer ONLY the specific topic the user inquired about.
+   - STRICT ENTITY ISOLATION:
+     * When the user asks about Hostel (e.g. fees, wardens, rooms, payment procedure), do NOT mention general college admissions, CET codes, or management quota procedures!
+     * When the user asks about Admissions, do NOT discuss hostel arrangements unless explicitly requested.
+     * When the user asks about a specific department (e.g. CSE), discuss ONLY that department. Do NOT pull in unrelated programs (like VLSI, Civil, Mechanical) or generic committees.
+   - Ignore extraneous website navigation bars, header links, or unrelated sections that may appear in the raw context.
 
-10. DEPARTMENT OVERVIEWS & ACADEMIC PROFILES:
-   - When the user asks about a department (e.g. "about cse dept in bmsit", "tell me about ise", "overview of ece"):
-     * Provide a detailed, multi-section overview synthesizing the department profile, key specializations, divisions, academic programs, and leadership from the records.
-     * Never reduce a department overview to an isolated fragment.
+10. DYNAMIC ADAPTIVE LENGTH & PROPORTIONALITY:
+   - Form and calibrate the answer length strictly based on the user's question:
+     * For specific factual or multi-part questions (e.g. 'tell me about boys hostel and its fee payment procedure'): Focus directly on the requested facts (e.g. room types, fees, bank account details, payment steps). Present a clean, well-organized response without dumping irrelevant minutiae, kitchen appliances, or unrelated trivia.
+     * For exhaustive roster requests (e.g. 'name all faculties of bmsit', 'list all cse professors'): Provide the full enumeration with bold names and designations.
+     * For brief/short constraints (e.g. 'briefly', 'in 1 line'): Strictly adhere to the requested length.
 """
 
 
@@ -218,9 +229,13 @@ class GeminiService:
                     "Please keep interactions courteous. How may I assist you with information about BMSIT?"
                 )
 
-        # 3. Friendly greetings and polite navigation
-        greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afternoon", "namaste", "help", "who are you", "what can you do"]
-        if any(msg_lower == g or msg_lower.startswith(g + " ") for g in greetings):
+        # 3. Friendly greetings, introductions, and polite navigation
+        greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afternoon", "namaste", "help", "who are you", "what can you do", "what is your name"]
+        if (
+            any(msg_lower == g or msg_lower.startswith(g + " ") for g in greetings)
+            or re.search(r"\b(i\s*am|i['’]?m|my\s+name\s+is|myself|this\s+is|call\s+me)\b", msg_lower)
+            or bool(re.search(r"\b[a-z]+\s+here\b", msg_lower))
+        ):
             return True, None
 
         # Check for obvious external questions (recipes, generic coding, outside trivia)
@@ -268,19 +283,101 @@ class GeminiService:
                 "session_id": session_id
             }
 
-        # Friendly greeting handler
-        msg_lower = user_message.lower().strip()
-        if msg_lower in ["hi", "hello", "hey", "namaste", "good morning", "good evening", "good afternoon"]:
-            greeting_reply = (
-                "👋 **Hello and welcome to BMSIT&M!**\n\n"
-                "I am your official AI College Guide. I can help you with:\n"
-                "• **Admissions & Eligibility** (KCET, COMEDK, Management Quota)\n"
-                "• **Programs & Departments** (CSE, AI&ML, ISE, ECE, ME, CV, MCA, M.Tech, etc.)\n"
-                "• **Placement Records & Recruiters**\n"
-                "• **Hostel Facilities, Fees & Campus Amenities**\n"
-                "• **Official College Contacts & Office Hours**\n\n"
-                "What would you like to know about BMSIT today?"
-            )
+        # Friendly greeting and self-introduction handler
+        # Matches introduction patterns like "Hi, I am Rahul", "My name is Priya", "I'm Kushal", "Myself Rohan", "Call me Kushal", "Kushal here"
+        msg_clean = user_message.strip()
+        msg_lower = msg_clean.lower()
+
+        # Non-name tokens to prevent false positives when parsing candidate names
+        non_name_tokens = {
+            "a", "an", "the", "here", "there", "looking", "interested", "asking", "enquiring",
+            "student", "parent", "aspirant", "someone", "from", "studying", "new", "just",
+            "having", "facing", "want", "wanting", "need", "needing", "trying", "applying",
+            "tell", "what", "how", "when", "where", "which", "why", "who", "can", "could",
+            "would", "should", "will", "please", "help", "info", "information", "details",
+            "good", "fine", "ok", "okay", "yes", "no", "thanks", "thank", "bmsit", "college",
+            "assistant", "bot", "hi", "hello", "hey", "namaste", "greetings"
+        }
+
+        user_name = None
+
+        # Pattern 1: Explicit introduction phrases e.g. "I am Kushal", "My name is Priya Sharma", "Myself Rohan", "This is Rahul", "Call me Kushal", "Name: Kushal"
+        intro_match = re.search(
+            r"\b(?:i\s*am|i['’]?m|my\s+name\s+is|myself|this\s+is|call\s+me|name\s*[:\-]?\s*)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\b",
+            msg_clean,
+            re.IGNORECASE
+        )
+        if intro_match:
+            candidate = intro_match.group(1).strip()
+            cand_words = candidate.lower().split()
+            if cand_words and all(w not in non_name_tokens and len(w) >= 2 for w in cand_words):
+                user_name = candidate.title()
+
+        # Pattern 2: "<Name> here" e.g. "Kushal here", "Hi Kushal here"
+        if not user_name:
+            here_match = re.search(r"\b([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+here\b", msg_clean, re.IGNORECASE)
+            if here_match:
+                candidate = here_match.group(1).strip()
+                cand_words = candidate.lower().split()
+                if cand_words and all(w not in non_name_tokens and len(w) >= 2 for w in cand_words):
+                    user_name = candidate.title()
+
+        # Pattern 3: User directly provides a 1-2 word name (e.g. "Kushal", "Kushal Hegde")
+        if not user_name:
+            words = msg_clean.split()
+            if 1 <= len(words) <= 2 and all(re.match(r"^[A-Za-z]{2,25}$", w) for w in words):
+                cand_words = [w.lower() for w in words]
+                # Ensure it's not a greeting or common conversational/stop word
+                if all(w not in non_name_tokens for w in cand_words):
+                    # Check that it's not a query for college facilities
+                    query_signal = any(w in cand_words for w in ("fees", "hostel", "cse", "admission", "cutoff", "placements", "syllabus", "exam", "branch", "campus", "sports", "library", "warden", "principal", "mess", "gate", "comedk", "kcet"))
+                    if not query_signal:
+                        user_name = " ".join(words).title()
+
+        is_greeting = (
+            user_name is not None or
+            msg_lower in ["hi", "hello", "hey", "namaste", "good morning", "good evening", "good afternoon", "greetings", "help"] or
+            bool(re.match(r"^(?:hi|hello|hey|namaste)\s*[,.!]?$", msg_lower)) or
+            msg_lower in ["who are you", "what is your name", "what can you do"]
+        )
+
+        if is_greeting:
+            if user_name:
+                greeting_reply = (
+                    f"👋 **Hello {user_name}, welcome to BMSIT&M!**\n\n"
+                    f"Nice to meet you! I am your official **AI College Guide** for **B.M.S. Institute of Technology and Management**, Bengaluru.\n\n"
+                    f"I can assist you with verified official information on:\n"
+                    f"• **Admissions & Eligibility** (KCET, COMEDK, Management Quota)\n"
+                    f"• **Departments & Academic Programs** (CSE, AI&ML, ISE, ECE, ME, CV, MCA, MBA)\n"
+                    f"• **Placement Statistics, Packages & Top Recruiters**\n"
+                    f"• **Hostel Accommodations, Room Fees & Mess Details**\n"
+                    f"• **Faculty, Leadership & Campus Contact Info**\n\n"
+                    f"How may I assist you with BMSIT today, **{user_name}**?"
+                )
+            elif msg_lower in ["who are you", "what is your name", "what can you do"]:
+                greeting_reply = (
+                    "🤖 **I am the official AI Assistant for B.M.S. Institute of Technology and Management (BMSIT&M)**, Bengaluru.\n\n"
+                    "I provide verified information directly from official BMSIT records regarding:\n"
+                    "• **Admissions & Eligibility** (KCET, COMEDK, Management Quota)\n"
+                    "• **Departments & Programs** (Undergraduate, Postgraduate, Ph.D.)\n"
+                    "• **Placement Statistics & Recruiters**\n"
+                    "• **Hostel Accommodations, Fees & Payment Procedures**\n"
+                    "• **Faculty Members, Leadership & Campus Facilities**\n\n"
+                    "What would you like to know about BMSIT today?"
+                )
+            else:
+                greeting_reply = (
+                    "👋 **Hello and welcome to BMSIT&M!**\n\n"
+                    "I am your official **AI College Guide** for **B.M.S. Institute of Technology and Management**, Bengaluru.\n\n"
+                    "I can help you with:\n"
+                    "• **Admissions & Eligibility** (KCET, COMEDK, Management Quota)\n"
+                    "• **Programs & Departments** (CSE, AI&ML, ISE, ECE, ME, CV, MCA, M.Tech, etc.)\n"
+                    "• **Placement Records & Recruiters**\n"
+                    "• **Hostel Facilities, Fees & Campus Amenities**\n"
+                    "• **Official College Contacts & Office Hours**\n\n"
+                    "What would you like to know about BMSIT today?"
+                )
+
             # Record in memory
             history_mgr = LangChainHistoryManager.get_instance()
             history_mgr.append_turn(session_id, user_message, greeting_reply)
@@ -330,13 +427,15 @@ class GeminiService:
                     "session_id": session_id
                 }
 
-        # Build context string from top retrieved chunks
+        # Build context string from top retrieved chunks with cross-contamination filtering
         top_k = int(getattr(Config, "TOP_K", 10) or 10)
+        filtered_chunks = cls._filter_relevant_chunks(search_query, retrieved_chunks, top_k)
+
         context_parts = []
         sources = []
         seen_sources = set()
 
-        for chunk in retrieved_chunks[:top_k]:
+        for chunk in filtered_chunks:
             source_name = chunk.get("source_name", "BMSIT Document")
             source_type = chunk.get("source_type", "document")
             meta = chunk.get("metadata", {})
@@ -380,7 +479,7 @@ class GeminiService:
 
         # Fallback knowledge synthesis if API call failed or keys are missing
         if not reply:
-            reply = cls._synthesize_from_context(user_message, retrieved_chunks)
+            reply = cls._synthesize_from_context(user_message, filtered_chunks)
 
         # Record this completed turn into LangChain conversational memory
         history_mgr.append_turn(session_id, user_message, reply)
@@ -391,6 +490,85 @@ class GeminiService:
             "guardrail_triggered": False,
             "session_id": session_id
         }
+
+    @classmethod
+    def _filter_relevant_chunks(
+        cls,
+        query: str,
+        chunks: List[dict],
+        top_k: int
+    ) -> List[dict]:
+        """
+        Dynamic IR filtering: eliminates off-topic cross-contamination without any hardcoded domain keywords.
+        Uses pure Information Retrieval mathematical metrics:
+        1. Query stem density across chunk titles and text.
+        2. Relative score drop thresholding against top chunk.
+        """
+        if not chunks:
+            return []
+        if len(chunks) == 1:
+            return chunks[:top_k]
+
+        q_lower = query.lower()
+        stop_words = {"the", "and", "for", "with", "all", "need", "about", "tell", "list", "names", "what", "give", "please", "can", "you", "i", "how", "are", "is", "its"}
+        raw_query_terms = [
+            t for t in re.findall(r"\b[a-zA-Z0-9_-]+\b", q_lower)
+            if len(t) >= 3 and not t.isdigit() and t not in stop_words
+        ]
+        query_stems = [
+            t[:-1] if (t.endswith("s") and not t.endswith("ss") and len(t) > 3) else t
+            for t in raw_query_terms
+        ]
+
+        top_chunk = chunks[0]
+        top_score = float(top_chunk.get("score", 0.0))
+
+        # Calculate stem overlap for each chunk
+        scored_chunks = []
+        for c in chunks:
+            src_name = str(c.get("source_name", "")).lower()
+            meta = c.get("metadata", {}) or {}
+            sec = str(meta.get("section_title") or meta.get("page") or "").lower()
+            text = str(c.get("text", "")).lower()
+            score = float(c.get("score", 0.0))
+
+            title_combined = f"{src_name} {sec}"
+            title_hits = sum(1 for st in query_stems if (st in title_combined or (len(st) >= 4 and st[:4] in title_combined)))
+            text_hits = sum(1 for st in query_stems if (st in text or (len(st) >= 4 and st[:4] in text)))
+
+            scored_chunks.append({
+                "chunk": c,
+                "score": score,
+                "title_hits": title_hits,
+                "text_hits": text_hits
+            })
+
+        max_title_hits = max((sc["title_hits"] for sc in scored_chunks), default=0)
+        max_text_hits = max((sc["text_hits"] for sc in scored_chunks), default=0)
+
+        filtered = []
+        for sc in scored_chunks:
+            c = sc["chunk"]
+            score = sc["score"]
+            title_hits = sc["title_hits"]
+            text_hits = sc["text_hits"]
+
+            # When top chunk has strong query title alignment, prune chunks with ZERO title hits
+            # that also have weak text hits or significant score drop (cross-contaminating headers/other docs)
+            if max_title_hits >= 1 and title_hits == 0:
+                if max_text_hits >= 3 and text_hits < max(2, int(max_text_hits * 0.45)):
+                    continue
+                if top_score > 0.4 and score < (top_score * 0.60):
+                    continue
+
+            # Relative score threshold: discard chunks that drop by more than 50% from top chunk
+            # unless they have direct title alignment with the query
+            if top_score > 0.4 and score < (top_score * 0.50) and title_hits == 0:
+                continue
+
+            filtered.append(c)
+
+        return filtered[:top_k] if filtered else chunks[:1]
 
     @classmethod
     def _contextualize_query(cls, query: str, conversation_history: Optional[List[dict]] = None) -> str:
@@ -427,7 +605,7 @@ class GeminiService:
 USER QUESTION:
 {query}
 
-ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above, completing all sentences and list items):"""
+ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above, completing all sentences. HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**):"""
 
         session = cls._get_session()
         timeout_sec = float(getattr(Config, "CHAT_TIMEOUT", 45) or 45)
@@ -568,13 +746,12 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
             for t in raw_tokens
         ]
 
-        # Dynamic query intent parsing
-        lines_match = re.search(r"\b(\d+)\s*(?:line|point|bullet|sentence)s?\b", q_lower)
+        # Dynamic query intent parsing (zero hardcoding)
+        lines_match = re.search(r"\b(\d+)\s*(?:line|point|bullet|sentence|item|entry|detail)s?\b", q_lower)
         target_count = int(lines_match.group(1)) if lines_match else None
-        one_line_requested = bool(re.search(r"\b(one\s+line|single\s+sentence|in\s+short)\b", q_lower))
-        brief_requested = bool(re.search(r"\b(brief|briefly|summary)\b", q_lower))
-        all_requested = bool(re.search(r"\b(all|every|full|complete|list|names?|facult|professor|members?|branches?|courses?)\b", q_lower))
-        is_faculty_query = bool(re.search(r"\b(facult|professor|prof|teacher|staff|hod|head|warden|authorit|incharge|dean|director|names?)\b", q_lower))
+        one_line_requested = bool(re.search(r"\b(one\s+line|single\s+(?:sentence|line|point)|in\s+(?:a\s+word|short|nutshell))\b", q_lower))
+        brief_requested = bool(re.search(r"\b(brief|briefly|summary|concise|overview)\b", q_lower))
+        is_exhaustive_query = bool(re.search(r"\b(all|every|entire|complete|whole|full|roster|list\s+all|list\s+every)\b", q_lower))
 
         candidate_lines = []
         seen_snippets = set()
@@ -618,26 +795,35 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
                 if len(content_text) < 10:
                     continue
 
-                item_lower = item_clean.lower()
-
-                # Dynamic scoring
-                token_hits = sum(1 for st in stems if (st in item_lower or (len(st) >= 4 and st[:4] in item_lower)))
-
-                has_person_signal = bool(re.search(r"\b(Dr\.|Prof\.|Mr\.|Mrs\.|Ms\.|Professor|Associate\s+Head|Head|HoD|HOD|Warden|Dean|Director|Principal|Incharge|In-Charge|Lecturer|Faculty|President|Secretary)\b", item_clean))
+                has_honorific = bool(re.search(r"\b(Dr|Prof|Mr|Mrs|Ms|Shri|Smt)\.?\s+[A-Z]", item_clean))
+                is_entity_line = bool(re.match(r"^[A-Z][A-Za-z0-9\s&/]{2,40}\s*[:\-–]", item_clean))
+                has_digits = bool(re.search(r"\d", item_clean))
                 has_bullet_or_number = bool(re.match(r"^[-*•\d.]+", item_clean))
 
-                if is_faculty_query:
-                    if not (has_person_signal or token_hits > 0 or (is_title_relevant and has_bullet_or_number)):
-                        continue
-                elif token_hits == 0 and not is_title_relevant and not is_top_chunk:
+                # Filter out short tag-noise (isolated keywords without digits or honorific/entity structure)
+                words = content_text.split()
+                if len(words) <= 3 and not has_digits and not has_honorific and not is_entity_line:
                     continue
 
-                score = (token_hits * 3.0) + (4.0 if has_person_signal else 0.0) + (3.0 if is_title_relevant else 0.0) + (2.0 if is_top_chunk else 0.0)
+                item_lower = item_clean.lower()
 
-                normalized_snippet = re.sub(r"\s+", " ", item_lower[:80]).strip()
-                if normalized_snippet in seen_snippets:
+                # Dynamic scoring based on query stem overlap
+                token_hits = sum(1 for st in stems if (st in item_lower or (len(st) >= 4 and st[:4] in item_lower)))
+
+                if token_hits == 0 and not is_title_relevant and not is_top_chunk:
                     continue
-                seen_snippets.add(normalized_snippet)
+
+                score = (token_hits * 3.0) + (3.0 if (has_honorific or is_entity_line) else 0.0) + (3.0 if is_title_relevant else 0.0) + (2.0 if is_top_chunk else 0.0)
+                if has_digits:
+                    score += 1.0
+                if has_bullet_or_number:
+                    score += 1.0
+
+                # Robust snippet deduplication
+                clean_key = re.sub(r"[^a-z0-9]", "", item_lower)
+                if clean_key in seen_snippets or any(clean_key in sk or sk in clean_key for sk in seen_snippets if len(clean_key) > 20):
+                    continue
+                seen_snippets.add(clean_key)
 
                 # Ensure clean statement without unclosed parentheses
                 final_item = item_clean
@@ -669,8 +855,43 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
         if not source_sections:
             return unknown_message
 
-        # Select lines according to dynamic length constraints
-        limit = target_count if target_count is not None else (1 if one_line_requested else (4 if brief_requested else (60 if (all_requested or is_faculty_query) else 20)))
+        # Single-topic isolation: if query targets a single subject and is not an exhaustive list query,
+        # keep ONLY the primary matching source section to prevent cross-topic contamination
+        if len(source_sections) > 1 and not is_exhaustive_query:
+            primary_src = next(iter(source_sections))
+            source_sections = {primary_src: source_sections[primary_src]}
+
+        # Dynamic adaptive length: calibrate limit proportionally to the question
+        limit = target_count if target_count is not None else (
+            1 if one_line_requested else (
+                4 if brief_requested else (
+                    50 if is_exhaustive_query else 8
+                )
+            )
+        )
+
+        def _bold_main_points(line_text: str) -> str:
+            item = line_text.strip()
+            item = re.sub(r"^[-*•#|>\d.)\s]+", "", item).strip()
+            if not item:
+                return ""
+            if "**" in item:
+                return f"* {item}"
+            # Pattern 1: Title + Name with honorific (e.g., Dr. Sanjay H A, Prof. Ozwin Dominic D'Souza)
+            m_name = re.match(r"^((?:Dr|Prof|Mr|Mrs|Ms|Shri|Smt)\.?\s+[A-Za-z\s.'’]+?)([\s,:\-–(].*)$", item)
+            if m_name:
+                name_part = m_name.group(1).strip()
+                rest = m_name.group(2).strip()
+                if rest.startswith(",") or rest.startswith(":"):
+                    rest = " -" + rest[1:]
+                return f"* **{name_part}** {rest}"
+            # Pattern 2: Entity / Topic Heading followed by colon or hyphen (e.g., Fees Structure: ..., Eligibility: ...)
+            m_lead = re.match(r"^([A-Z][A-Za-z0-9\s&/]{2,40}?)\s*[:\-–]\s*(.+)$", item)
+            if m_lead and not m_lead.group(1).lower().startswith(("this", "the", "that", "there", "these", "it", "they", "we")):
+                lead = m_lead.group(1).strip()
+                body = m_lead.group(2).strip()
+                return f"* **{lead}**: {body}"
+            return f"* {item}"
 
         output_blocks = []
         for src, lines in source_sections.items():
@@ -678,12 +899,11 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
                 continue
             selected_lines = lines[:limit]
             if one_line_requested:
-                output_blocks.append(f"**{src}**: {selected_lines[0]}")
+                first = _bold_main_points(selected_lines[0]).lstrip("* ")
+                output_blocks.append(f"**{src}**: {first}")
                 break
             else:
-                formatted_lines = "\n".join(f"* {l if l.startswith(('*', '-', '•')) else '* ' + l}" for l in selected_lines)
-                # Clean duplicate bullets if any
-                formatted_lines = re.sub(r"^\*\s*[*•-]\s*", "* ", formatted_lines, flags=re.MULTILINE)
+                formatted_lines = "\n".join(_bold_main_points(l) for l in selected_lines if l.strip())
                 output_blocks.append(f"**{src}:**\n{formatted_lines}")
             if len(output_blocks) >= (1 if brief_requested else 4):
                 break
