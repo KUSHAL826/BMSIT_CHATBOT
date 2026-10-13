@@ -341,8 +341,11 @@ class GeminiService:
             msg_lower in ["who are you", "what is your name", "what can you do"]
         )
 
+        history_mgr = LangChainHistoryManager.get_instance()
+
         if is_greeting:
             if user_name:
+                history_mgr.set_user_name(session_id, user_name)
                 greeting_reply = (
                     f"👋 **Hello {user_name}, welcome to BMSIT&M!**\n\n"
                     f"Nice to meet you! I am your official **AI College Guide** for **B.M.S. Institute of Technology and Management**, Bengaluru.\n\n"
@@ -379,10 +382,92 @@ class GeminiService:
                 )
 
             # Record in memory
-            history_mgr = LangChainHistoryManager.get_instance()
             history_mgr.append_turn(session_id, user_message, greeting_reply)
             return {
                 "reply": greeting_reply,
+                "sources": [],
+                "guardrail_triggered": False,
+                "session_id": session_id
+            }
+
+        # Conversational Border Case 1: Inquiries about user's own identity / name
+        is_user_name_query = bool(re.search(
+            r"\b(?:(?:do\s+(?:you|u)\s+(?:know|remember)|what\s+is|tell\s+me|know)\s+(?:my\s+name|who\s+i\s+am)|who\s+am\s+i|my\s+name\??)\b",
+            msg_lower
+        ))
+        if is_user_name_query:
+            saved_name = history_mgr.get_user_name(session_id)
+            if not saved_name and conversation_history:
+                for turn in reversed(conversation_history):
+                    t_role = str(turn.get("role", "")).lower()
+                    t_content = str(turn.get("content") or turn.get("text") or "")
+                    if t_role in ("user", "human"):
+                        m = re.search(r"\b(?:i\s*am|i['’]?m|my\s+name\s+is|myself|this\s+is|call\s+me)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\b", t_content, re.IGNORECASE)
+                        if m:
+                            cand = m.group(1).strip()
+                            if all(w.lower() not in non_name_tokens and len(w) >= 2 for w in cand.split()):
+                                saved_name = cand.title()
+                                history_mgr.set_user_name(session_id, saved_name)
+                                break
+
+            if saved_name:
+                reply_text = (
+                    f"😊 **Yes! You introduced yourself as {saved_name}.**\n\n"
+                    f"It's a pleasure chatting with you, **{saved_name}**! How can I assist you with BMSIT programs, admissions, hostels, or placements today?"
+                )
+            else:
+                reply_text = (
+                    "I don't know your name yet because you haven't introduced yourself!\n\n"
+                    "Feel free to introduce yourself (for example, *'I am Kushal'*), and I'll be glad to remember your name. "
+                    "How may I help you with BMSIT today?"
+                )
+
+            history_mgr.append_turn(session_id, user_message, reply_text)
+            return {
+                "reply": reply_text,
+                "sources": [],
+                "guardrail_triggered": False,
+                "session_id": session_id
+            }
+
+        # Conversational Border Case 2: How are you
+        if bool(re.search(r"\b(?:how\s+are\s+you|how\s+r\s+u|how're\s+you|how\s+are\s+you\s+doing)\b", msg_lower)):
+            reply_text = (
+                "😊 **I'm doing great, thank you for asking!**\n\n"
+                "I am your official AI Assistant for **B.M.S. Institute of Technology and Management (BMSIT&M)**.\n\n"
+                "How can I assist you today with admissions, courses, hostels, or campus life?"
+            )
+            history_mgr.append_turn(session_id, user_message, reply_text)
+            return {
+                "reply": reply_text,
+                "sources": [],
+                "guardrail_triggered": False,
+                "session_id": session_id
+            }
+
+        # Conversational Border Case 3: Gratitude
+        if bool(re.search(r"^(?:thank\s+you|thanks|thank\s+u|thx|thanks\s+a\s+lot|thank\s+you\s+so\s+much)\b", msg_lower)):
+            reply_text = (
+                "🎓 **You're very welcome!**\n\n"
+                "Feel free to ask anytime if you need more details about BMSIT&M. Have a wonderful day!"
+            )
+            history_mgr.append_turn(session_id, user_message, reply_text)
+            return {
+                "reply": reply_text,
+                "sources": [],
+                "guardrail_triggered": False,
+                "session_id": session_id
+            }
+
+        # Conversational Border Case 4: Farewell
+        if bool(re.search(r"^(?:bye|goodbye|see\s+you|cya|take\s+care)\b", msg_lower)):
+            reply_text = (
+                "👋 **Goodbye!**\n\n"
+                "Feel free to return whenever you have questions regarding BMSIT&M. Have a great day ahead!"
+            )
+            history_mgr.append_turn(session_id, user_message, reply_text)
+            return {
+                "reply": reply_text,
                 "sources": [],
                 "guardrail_triggered": False,
                 "session_id": session_id
@@ -475,7 +560,7 @@ class GeminiService:
             try:
                 reply = cls._call_gemini_api(api_keys, user_message, context_text, history_block)
             except Exception as e:
-                logger.error(f"[Gemini] API Call failed: {e}. Falling back to knowledge synthesis.")
+                logger.info(f"[Gemini] API generation unavailable ({e}). Seamlessly serving response via verified knowledge synthesis.")
 
         # Fallback knowledge synthesis if API call failed or keys are missing
         if not reply:
@@ -614,9 +699,10 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
         configured_model = (getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite").strip()
         chat_models = getattr(Config, "CHAT_MODELS", []) or []
         model_tier = []
-        for m in [configured_model] + chat_models + ["gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-latest"]:
+        for m in [configured_model] + chat_models + ["gemini-3.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]:
             m = m.strip()
-            if m and m not in model_tier:
+            # Exclude known invalid model names that return 404
+            if m and m != "gemini-2.5-flash-lite" and m not in model_tier:
                 model_tier.append(m)
 
         max_output_tokens = getattr(Config, "MAX_OUTPUT_TOKENS", 0) or 0
@@ -633,7 +719,7 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
             for model in model_tier:
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
 
-                # Attempt 1: Standard payload with system_instruction
+                # Standard payload with system_instruction
                 payload = {
                     "system_instruction": {
                         "parts": [{"text": SYSTEM_PROMPT}]
@@ -648,43 +734,63 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
                 if gen_config:
                     payload["generationConfig"] = gen_config
 
-                try:
-                    resp = session.post(url, json=payload, timeout=timeout_sec)
-                    # Attempt 2: If system_instruction is not accepted on this model, retry with inline prompt
-                    if resp.status_code == 400 and "system_instruction" in payload:
-                        inline_payload = {
-                            "contents": [
-                                {
-                                    "role": "user",
-                                    "parts": [{"text": f"{SYSTEM_PROMPT}\n\n{history_block}{user_prompt}"}]
-                                }
-                            ]
-                        }
-                        if gen_config:
-                            inline_payload["generationConfig"] = gen_config
-                        resp = session.post(url, json=inline_payload, timeout=timeout_sec)
+                # Retry up to 2 times with backoff on transient HTTP 503 (temporary Google demand spike)
+                max_retries = 2
+                for attempt in range(max_retries + 1):
+                    try:
+                        resp = session.post(url, json=payload, timeout=timeout_sec)
+                        # If system_instruction is not accepted on this model, retry with inline prompt
+                        if resp.status_code == 400 and "system_instruction" in payload:
+                            inline_payload = {
+                                "contents": [
+                                    {
+                                        "role": "user",
+                                        "parts": [{"text": f"{SYSTEM_PROMPT}\n\n{history_block}{user_prompt}"}]
+                                    }
+                                ]
+                            }
+                            if gen_config:
+                                inline_payload["generationConfig"] = gen_config
+                            resp = session.post(url, json=inline_payload, timeout=timeout_sec)
 
-                    if resp.status_code == 200:
-                        res_json = resp.json()
-                        candidates = res_json.get("candidates", [])
-                        if candidates:
-                            parts = candidates[0].get("content", {}).get("parts", [])
-                            texts = [p["text"] for p in parts if isinstance(p, dict) and p.get("text")]
-                            if texts:
-                                cls._active_model = model
-                                return "\n".join(texts).strip()
+                        if resp.status_code == 200:
+                            res_json = resp.json()
+                            candidates = res_json.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                texts = [p["text"] for p in parts if isinstance(p, dict) and p.get("text")]
+                                if texts:
+                                    cls._active_model = model
+                                    return "\n".join(texts).strip()
 
-                    if resp.status_code == 429:
-                        last_error = f"Key ending in ...{key[-4:]} hit 429 quota. Rotating key."
-                        logger.warning(f"[Gemini] {last_error}")
-                        break  # Rotate to next key
+                        if resp.status_code == 503:
+                            if attempt < max_retries:
+                                backoff = 1.0 * (attempt + 1)
+                                logger.info(f"[Gemini] {model} is experiencing a transient demand spike (HTTP 503). Retrying in {backoff}s...")
+                                time.sleep(backoff)
+                                continue
+                            else:
+                                logger.info(f"[Gemini] {model} busy after {max_retries} retries; falling over to next model in tier.")
+                                break
 
-                    last_error = f"Model {model} returned HTTP {resp.status_code}: {resp.text[:120]}"
-                    logger.warning(f"[Gemini] {last_error}")
-                except Exception as e:
-                    last_error = f"Model {model} exception: {e}"
-                    logger.warning(f"[Gemini] {last_error}")
-                    continue
+                        if resp.status_code == 429:
+                            logger.info(f"[Gemini] Key ending in ...{key[-4:]} hit rate limit (HTTP 429). Rotating to next key.")
+                            last_error = f"Key ending in ...{key[-4:]} hit rate limit (429)"
+                            break  # Rotate to next key
+
+                        if resp.status_code == 404:
+                            last_error = f"Model {model} returned HTTP 404"
+                            break
+
+                        last_error = f"Model {model} returned HTTP {resp.status_code}: {resp.text[:120]}"
+                        break
+
+                    except Exception as e:
+                        last_error = f"Model {model} network error: {e}"
+                        if attempt < max_retries:
+                            time.sleep(1.0)
+                            continue
+                        break
 
         raise RuntimeError(f"All Gemini models and keys in tier failed: {last_error}")
 

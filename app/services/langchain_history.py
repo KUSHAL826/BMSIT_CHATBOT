@@ -63,6 +63,7 @@ class LangChainHistoryManager:
     def __init__(self):
         self._sessions: Dict[str, InMemoryChatMessageHistory] = {}
         self._last_active: Dict[str, float] = {}
+        self._user_names: Dict[str, str] = {}
         self._session_lock = threading.RLock()
 
     @classmethod
@@ -82,6 +83,23 @@ class LangChainHistoryManager:
         for sid in stale_ids:
             self._sessions.pop(sid, None)
             self._last_active.pop(sid, None)
+            self._user_names.pop(sid, None)
+
+    def set_user_name(self, session_id: Optional[str], name: str):
+        """Stores the recognized user's name for this session."""
+        if not session_id or not name:
+            return
+        sid = str(session_id).strip()
+        with self._session_lock:
+            self._user_names[sid] = name.strip()
+
+    def get_user_name(self, session_id: Optional[str]) -> Optional[str]:
+        """Retrieves the user's name if previously introduced in this session."""
+        if not session_id:
+            return None
+        sid = str(session_id).strip()
+        with self._session_lock:
+            return self._user_names.get(sid)
 
     def get_session_history(self, session_id: str) -> InMemoryChatMessageHistory:
         """Retrieves or creates a LangChain InMemoryChatMessageHistory for a session."""
@@ -267,7 +285,7 @@ class LangChainHistoryManager:
         except Exception:
             session = requests.Session()
 
-        models = [getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-latest"]
+        models = [getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"maxOutputTokens": 60}

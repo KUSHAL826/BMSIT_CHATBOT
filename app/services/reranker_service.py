@@ -210,7 +210,7 @@ Output JSON ONLY in this format:
         except Exception:
             session = requests.Session()
 
-        models = [getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-latest"]
+        models = [getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "gemini-2.0-flash", "gemini-1.5-flash"]
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {

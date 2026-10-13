@@ -38,6 +38,8 @@ STOP_WORDS = {
     "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
     "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "did",
     "bmsit", "bms", "college", "institute", "there", "any", "please", "give", "list",
+    "my", "your", "our", "i", "we", "he", "she", "it", "they", "them", "his", "her",
+    "their", "know", "knows", "knew", "remember", "name", "names",
 }
 
 
@@ -749,12 +751,12 @@ class RAGService:
                     if 0 <= i < len(positions)
                 ]
                 if hits:
-                    values = [s for _, s in hits]
-                    low, high = min(values), max(values)
-                    spread = (high - low) or 1.0
+                    # L2-normalized vector inner product equals true cosine similarity in [-1.0, 1.0]
+                    # Clamp to [0.0, 1.0] without distorting min-max scaling
                     for position, score in hits:
-                        normalized = (score - low) / spread if spread > 0 else score
-                        dense_scores[position] = max(dense_scores.get(position, 0.0), normalized)
+                        cos_sim = max(0.0, min(1.0, float(score)))
+                        if cos_sim > 0.15:
+                            dense_scores[position] = max(dense_scores.get(position, 0.0), cos_sim)
 
         candidates = {}
 
@@ -796,11 +798,16 @@ class RAGService:
                     continue
                 keyword_hits = sum(1 for stem in stems if re.search(r"\b" + re.escape(stem), text_lower))
                 title_hits = sum(1 for stem in stems if stem in title_lower)
-                if keyword_hits > 0 or title_hits > 0:
-                    dense_score = dense_scores.get(position, 0.0)
+                # Only consider if there is a dense hit, title match, or multiple keyword hits
+                dense_score = dense_scores.get(position, 0.0)
+                if dense_score > 0.0 or title_hits > 0 or keyword_hits >= 2 or (len(stems) == 1 and keyword_hits >= 1 and len(stems[0]) >= 4):
                     consider(position, dense_score)
 
         ranked = sorted(candidates.values(), key=lambda c: c["score"], reverse=True)
+
+        # Semantic cutoff: if best candidate has negligible semantic affinity (< 0.28), query has no relevant BMSIT documents
+        if ranked and ranked[0]["score"] < 0.28:
+            return []
 
         # Apply per-document cap to preserve source diversity in candidate pool
         pool, per_item = [], {}
