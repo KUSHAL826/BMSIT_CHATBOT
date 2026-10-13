@@ -267,27 +267,26 @@ class LangChainHistoryManager:
         except Exception:
             session = requests.Session()
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
-        try:
-            resp = session.post(
-                url,
-                json={
-                    "contents": [{"parts": [{"text": prompt}]}],
-                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 60}
-                },
-                timeout=4.0
-            )
-            if resp.status_code == 200:
-                candidates = resp.json().get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and parts[0].get("text"):
-                        result = parts[0]["text"].strip()
-                        # Sanity check: Ensure it didn't return an answer or long sentence
-                        if len(result.splitlines()) == 1 and len(result) < 150:
-                            return result.strip('"\'')
-        except Exception:
-            pass
+        models = [getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-latest"]
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {"maxOutputTokens": 60}
+        }
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            try:
+                resp = session.post(url, json=payload, timeout=3.5)
+                if resp.status_code == 200:
+                    candidates = resp.json().get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and parts[0].get("text"):
+                            result = parts[0]["text"].strip()
+                            # Sanity check: Ensure it didn't return an answer or long sentence
+                            if len(result.splitlines()) == 1 and len(result) < 150:
+                                return result.strip('"\'')
+            except Exception:
+                continue
         return None
 
     def _heuristic_reformulate(self, query: str, messages: List[BaseMessage]) -> str:

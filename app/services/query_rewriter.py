@@ -54,6 +54,11 @@ class QueryRewriter:
 
         # Multi-turn reference resolution via Gemini 3.5 Flash Lite
         effective_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        if not effective_key:
+            pooled = os.getenv("GEMINI_API_KEYS", "")
+            if pooled:
+                effective_key = pooled.split(",")[0].strip()
+
         if effective_key and effective_key != "your_api_key_here":
             try:
                 llm_rewritten = self._llm_rewrite(clean_query, messages, effective_key)
@@ -103,27 +108,28 @@ Optimized Search Query:"""
         except Exception:
             session = requests.Session()
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
+        models = [getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-latest"]
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.0,
                 "maxOutputTokens": 60
             }
         }
-        try:
-            resp = session.post(url, json=payload, timeout=2.5)
-            if resp.status_code == 200:
-                res_json = resp.json()
-                candidates = res_json.get("candidates", [])
-                if candidates:
-                    parts = candidates[0].get("content", {}).get("parts", [])
-                    if parts and parts[0].get("text"):
-                        result = parts[0]["text"].strip().strip('"\'')
-                        if len(result.splitlines()) == 1 and len(result) < 200:
-                            return result
-        except Exception:
-            pass
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            try:
+                resp = session.post(url, json=payload, timeout=2.5)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    candidates = res_json.get("candidates", [])
+                    if candidates:
+                        parts = candidates[0].get("content", {}).get("parts", [])
+                        if parts and parts[0].get("text"):
+                            result = parts[0]["text"].strip().strip('"\'')
+                            if len(result.splitlines()) == 1 and len(result) < 200:
+                                return result
+            except Exception:
+                continue
 
         return None
 

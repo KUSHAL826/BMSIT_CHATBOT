@@ -91,7 +91,7 @@ _SPEC = {
     "CHAT_TIMEOUT": ("int", 45),
     "MAX_OUTPUT_TOKENS": ("int", 0),
     "GEMINI_MODEL": ("str", "gemini-3.5-flash-lite"),
-    "CHAT_MODELS": ("list", "gemini-3.5-flash-lite"),
+    "CHAT_MODELS": ("list", "gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-flash-latest"),
 
     # Supabase Vector Store
     "SUPABASE_URL": ("str", ""),

@@ -57,6 +57,10 @@ class RerankerService:
             return chunks
 
         effective_key = api_key or os.getenv("GEMINI_API_KEY", "")
+        if not effective_key:
+            pooled = os.getenv("GEMINI_API_KEYS", "")
+            if pooled:
+                effective_key = pooled.split(",")[0].strip()
 
         # High-Speed Tier: Local Cross-Token Semantic Reranker with recency tie-breaking (<2ms latency)
         local_reranked = self._local_rerank(query, chunks)
@@ -206,38 +210,39 @@ Output JSON ONLY in this format:
         except Exception:
             session = requests.Session()
 
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
+        models = [getattr(Config, "GEMINI_MODEL", "gemini-3.5-flash-lite") or "gemini-3.5-flash-lite", "gemini-3.5-flash-lite", "gemini-2.5-flash-lite", "gemini-flash-latest"]
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
-                "temperature": 0.0,
                 "responseMimeType": "application/json",
                 "maxOutputTokens": 100
             }
         }
 
-        try:
-            resp = session.post(url, json=payload, timeout=3.5)
-            if resp.status_code == 200:
-                res_json = resp.json()
-                candidates_out = res_json.get("candidates", [])
-                if candidates_out:
-                    parts = candidates_out[0].get("content", {}).get("parts", [])
-                    if parts and parts[0].get("text"):
-                        parsed = json.loads(parts[0]["text"])
-                        ranked_indices = parsed.get("ranked_indices", [])
-                        if isinstance(ranked_indices, list) and ranked_indices:
-                            result = []
-                            seen = set()
-                            for idx in ranked_indices:
-                                if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen:
-                                    seen.add(idx)
-                                    item = dict(candidates[idx])
-                                    item["rerank_score"] = round(1.0 - (len(result) * 0.05), 3)
-                                    item["score"] = item["rerank_score"]
-                                    result.append(item)
-                            return result
-        except Exception:
-            pass
+        for m in models:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+            try:
+                resp = session.post(url, json=payload, timeout=3.5)
+                if resp.status_code == 200:
+                    res_json = resp.json()
+                    candidates_out = res_json.get("candidates", [])
+                    if candidates_out:
+                        parts = candidates_out[0].get("content", {}).get("parts", [])
+                        if parts and parts[0].get("text"):
+                            parsed = json.loads(parts[0]["text"])
+                            ranked_indices = parsed.get("ranked_indices", [])
+                            if isinstance(ranked_indices, list) and ranked_indices:
+                                result = []
+                                seen = set()
+                                for idx in ranked_indices:
+                                    if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen:
+                                        seen.add(idx)
+                                        item = dict(candidates[idx])
+                                        item["rerank_score"] = round(1.0 - (len(result) * 0.05), 3)
+                                        item["score"] = item["rerank_score"]
+                                        result.append(item)
+                                return result
+            except Exception:
+                continue
 
         return None

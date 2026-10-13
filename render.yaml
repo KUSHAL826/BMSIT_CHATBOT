@@ -132,7 +132,7 @@ services:
       - key: GEMINI_MODEL
         value: gemini-3.5-flash-lite
       - key: CHAT_MODELS
-        value: gemini-3.5-flash-lite
+        value: gemini-3.5-flash-lite,gemini-2.5-flash-lite,gemini-flash-latest
 
       # --- server ---
       # Render routes external traffic into the container, so bind to 0.0.0.0.
