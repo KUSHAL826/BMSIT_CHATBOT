@@ -4,13 +4,8 @@ Query Rewriter for BMSIT AI Chatbot.
 Transforms conversational, vague, or shorthand user queries into
 high-precision, search-optimized standalone queries for RAG vector & lexical search.
 
-Capabilities:
-1. Multi-turn reference resolution (pronouns, follow-ups, elliptical questions).
-2. Institutional term expansion (mapping college jargon, acronyms, quotas, departments).
-3. Topic shift preservation (guarantees that switching topics does not pollute retrieval).
-4. Dual-mode execution:
-   - High-speed Gemini LLM rewriter when online.
-   - Domain-aware heuristic rewriter fallback when offline or during quota limits.
+Zero hardcoded word lists or static dictionaries.
+Uses Gemini 3.5 Flash Lite for multi-turn conversational contextualization.
 """
 import logging
 import os
@@ -42,18 +37,24 @@ class QueryRewriter:
         api_key: Optional[str] = None
     ) -> str:
         """
-        Rewrites a raw user question into an optimal RAG search query.
+        Rewrites conversational follow-up or shorthand queries into standalone search queries.
+        Pure dynamic logic: zero predefined word lists or hardcoded dictionaries.
         """
         clean_query = (query or "").strip()
         if not clean_query:
             return clean_query
 
-        # 1. Check if multi-turn conversational resolution with pronouns is needed
-        referential_words = ["he", "she", "him", "her", "it", "its", "they", "them", "this", "that", "more", "details", "previous", "earlier"]
-        needs_context = messages and len(messages) >= 2 and any(re.search(r"\b" + w + r"\b", clean_query.lower()) for w in referential_words)
+        # If there is no previous conversation history, the query is already standalone (0ms latency)
+        if not messages or len(messages) < 2:
+            return clean_query
 
+        # Standalone detailed queries (6+ words) have full context on their own (0ms latency)
+        if len(clean_query.split()) >= 6:
+            return clean_query
+
+        # Multi-turn reference resolution via Gemini 3.5 Flash Lite
         effective_key = api_key or os.getenv("GEMINI_API_KEY", "")
-        if needs_context and effective_key and effective_key != "your_api_key_here":
+        if effective_key and effective_key != "your_api_key_here":
             try:
                 llm_rewritten = self._llm_rewrite(clean_query, messages, effective_key)
                 if llm_rewritten and len(llm_rewritten) >= 3:
@@ -62,9 +63,8 @@ class QueryRewriter:
             except Exception as e:
                 logger.debug(f"[QueryRewriter] LLM rewrite fallback triggered: {e}")
 
-        # 2. Ultra-fast deterministic rule-based rewrite (0ms latency)
-        heuristic_rewritten = self._heuristic_rewrite(clean_query, messages)
-        return heuristic_rewritten
+        # Dynamic fallback rewrite (0ms latency, zero hardcoded dictionaries)
+        return self._heuristic_rewrite(clean_query, messages)
 
     def _llm_rewrite(
         self,
@@ -73,14 +73,13 @@ class QueryRewriter:
         api_key: str
     ) -> Optional[str]:
         """
-        Calls Gemini to reformulate and expand the user query into a single, search-optimized query.
+        Fast LLM query reformulation using gemini-3.5-flash-lite only with pooled HTTP session.
         """
         history_context = ""
         if messages:
             recent_turns = []
             for m in messages[-4:]:
                 role = "User" if isinstance(m, HumanMessage) else "Assistant"
-                # Strip long content to preserve token speed
                 text = re.sub(r"\s+", " ", m.content[:200]).strip()
                 recent_turns.append(f"{role}: {text}")
             if recent_turns:
@@ -91,37 +90,40 @@ Your task is to rewrite the user's latest question into an optimal, standalone s
 
 Guidelines:
 1. Resolve all pronouns ('he', 'she', 'it', 'they', 'this course', 'that quota', 'its fees') using the conversation history.
-2. If the user changes topic (e.g. from hostel to computer science), focus EXCLUSIVELY on the new topic. Do NOT mix previous topics into the search query.
-3. Expand common college abbreviations where helpful (e.g., 'cse' -> 'computer science engineering', 'hod' -> 'head of department', 'hostel fee' -> 'hostel room fee structure').
-4. Keep the rewritten query concise, factual, and laser-focused on finding relevant passages in BMSIT records.
-5. Return ONLY the rewritten search query. Do NOT add preamble, quotes, explanations, or answers.
+2. If the user changes topic, focus EXCLUSIVELY on the new topic. Do NOT mix previous topics into the search query.
+3. Keep the rewritten query concise, factual, and laser-focused on finding relevant passages in BMSIT records.
+4. Return ONLY the rewritten search query. Do NOT add preamble, quotes, explanations, or answers.
 
 {history_context}Latest User Question: {query}
 Optimized Search Query:"""
 
-        models = ["gemini-3.5-flash", "gemma-4-26b-a4b-it"]
-        for m in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.0,
-                    "maxOutputTokens": 60
-                }
+        try:
+            from app.services.gemini_service import GeminiService
+            session = GeminiService._get_session()
+        except Exception:
+            session = requests.Session()
+
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.0,
+                "maxOutputTokens": 60
             }
-            try:
-                resp = requests.post(url, json=payload, timeout=5.0)
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    candidates = res_json.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        if parts and parts[0].get("text"):
-                            result = parts[0]["text"].strip().strip('"\'')
-                            if len(result.splitlines()) == 1 and len(result) < 200:
-                                return result
-            except Exception:
-                continue
+        }
+        try:
+            resp = session.post(url, json=payload, timeout=2.5)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                candidates = res_json.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts and parts[0].get("text"):
+                        result = parts[0]["text"].strip().strip('"\'')
+                        if len(result.splitlines()) == 1 and len(result) < 200:
+                            return result
+        except Exception:
+            pass
 
         return None
 
@@ -131,15 +133,11 @@ Optimized Search Query:"""
         messages: Optional[List[BaseMessage]]
     ) -> str:
         """
-        Pure dynamic rewrite: if referential pronouns are detected and previous turns exist,
-        combine with immediate prior user context; otherwise use clean query directly.
-        Zero hardcoded dictionaries or canned lists.
+        Pure dynamic rewrite: combine short follow-up with prior user query context.
+        Zero hardcoded dictionaries.
         """
         clean_query = query.strip()
-        referential_words = ["he", "she", "him", "her", "it", "its", "they", "them", "this", "that", "these", "those"]
-        has_referential = any(re.search(r"\b" + w + r"\b", clean_query.lower()) for w in referential_words)
-
-        if has_referential and messages:
+        if messages:
             for m in reversed(messages):
                 if isinstance(m, HumanMessage) and m.content:
                     prior_clean = m.content.strip()

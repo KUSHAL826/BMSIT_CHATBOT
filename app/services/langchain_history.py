@@ -261,60 +261,44 @@ class LangChainHistoryManager:
             "Standalone Query:"
         )
 
+        try:
+            from app.services.gemini_service import GeminiService
+            session = GeminiService._get_session()
+        except Exception:
+            session = requests.Session()
+
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
-        resp = requests.post(
-            url,
-            json={
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {"temperature": 0.0, "maxOutputTokens": 60}
-            },
-            timeout=8
-        )
-        if resp.status_code == 200:
-            candidates = resp.json().get("candidates", [])
-            if candidates:
-                parts = candidates[0].get("content", {}).get("parts", [])
-                if parts and parts[0].get("text"):
-                    result = parts[0]["text"].strip()
-                    # Sanity check: Ensure it didn't return an answer or long sentence
-                    if len(result.splitlines()) == 1 and len(result) < 150:
-                        return result.strip('"\'')
+        try:
+            resp = session.post(
+                url,
+                json={
+                    "contents": [{"parts": [{"text": prompt}]}],
+                    "generationConfig": {"temperature": 0.0, "maxOutputTokens": 60}
+                },
+                timeout=4.0
+            )
+            if resp.status_code == 200:
+                candidates = resp.json().get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts and parts[0].get("text"):
+                        result = parts[0]["text"].strip()
+                        # Sanity check: Ensure it didn't return an answer or long sentence
+                        if len(result.splitlines()) == 1 and len(result) < 150:
+                            return result.strip('"\'')
+        except Exception:
+            pass
         return None
 
     def _heuristic_reformulate(self, query: str, messages: List[BaseMessage]) -> str:
         """
-        Heuristic entity resolution when offline or during API timeouts.
-        Extracts key subject nouns from the most recent user turn.
+        Pure dynamic reformulation fallback (zero hardcoded entities or word lists).
+        Combines short follow-up query with the prior user question context.
         """
-        msg_lower = query.lower()
-        # Find key entity in the last user query
-        last_user_msg = ""
+        clean_query = query.strip()
         for m in reversed(messages):
-            if isinstance(m, HumanMessage):
-                last_user_msg = m.content
-                break
-
-        if not last_user_msg:
-            return query
-
-        # Detect specific entities in previous user question
-        college_entities = [
-            "computer science", "cse", "information science", "ise", "electronics", "ece",
-            "electrical", "eee", "mechanical", "civil", "ai&ml", "aiml", "aids", "vlsi",
-            "hostel", "placement", "placements", "admissions", "admission", "scholarship",
-            "principal", "library", "canteen", "bus", "transport"
-        ]
-        found_entity = None
-        last_lower = last_user_msg.lower()
-        for ent in college_entities:
-            if re.search(r"\b" + re.escape(ent) + r"\b", last_lower):
-                found_entity = ent
-                break
-
-        if found_entity and found_entity not in msg_lower:
-            # If current query is asking for details like "fees", "hod", "eligibility", "packages"
-            details = ["fee", "fees", "hod", "head", "placement", "cutoff", "package", "eligibility", "rules", "rooms", "seats"]
-            if any(d in msg_lower for d in details):
-                return f"{query} for {found_entity} at BMSIT"
-
-        return query
+            if isinstance(m, HumanMessage) and m.content:
+                prior_clean = m.content.strip()
+                if prior_clean and prior_clean.lower() != clean_query.lower():
+                    return f"{clean_query} ({prior_clean})"
+        return clean_query

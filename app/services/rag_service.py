@@ -791,6 +791,9 @@ class RAGService:
                 title_lower = (
                     f"{chunk.get('source_name', '')} {(chunk.get('metadata') or {}).get('title', '')}"
                 ).lower()
+                # Fast substring pre-check: skip chunks that don't match any stem before expensive regex
+                if not any(st in text_lower or st in title_lower for st in stems):
+                    continue
                 keyword_hits = sum(1 for stem in stems if re.search(r"\b" + re.escape(stem), text_lower))
                 title_hits = sum(1 for stem in stems if stem in title_lower)
                 if keyword_hits > 0 or title_hits > 0:

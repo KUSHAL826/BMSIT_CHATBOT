@@ -5,7 +5,6 @@ Key Capabilities:
 - Strict grounding in BMSIT official knowledge base (Zero Hallucination).
 - High extraction fidelity: Never falsely rejects queries when data exists in context.
 - LangChain Conversational Memory & History-Aware Query Reformulation.
-- Enterprise Multi-Model Failover (gemini-3.5-flash-lite -> gemini-3.8-flash -> gemini-3.6-flash -> gemini-flash-latest).
 - Robust Offline Semantic Synthesis Fallback.
 """
 import logging
@@ -45,7 +44,8 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
      * "head" / "HOD" / "in-charge"
      * "admissions" / "eligibility" / "criteria" / "KCET" / "COMEDK"
      * "hostel" / "accommodation" / "rooms" / "mess"
-   - When relevant information is present in the context, synthesize and deliver a complete, clear, and well-structured answer using markdown bullets, bold highlights, or tables.
+    - When relevant information is present in the context, synthesize and deliver a complete, clear, and well-structured answer using markdown bullets, bold highlights, or tables.
+    - When the user asks for a comprehensive list, multiple items, or exhaustive information (such as all professors, all assistant professors, all courses, all branches, or all recruiters), you MUST list ALL of them documented in the context without omitting any or cutting off early. Never truncate or summarize prematurely when full lists are requested.
 
 3. GRACEFUL MISSING INFORMATION PROTOCOL (STRICT REFUSAL RULE):
    - If—and ONLY if—the requested specific detail, entity, club, center, or facility is genuinely ABSENT from the provided knowledge base context:
@@ -92,13 +92,32 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
     - NEVER introduce peripheral or tangential departments, clubs, or topics. For example, if asked about a specific laboratory (such as AICTE IDEA Lab), discuss ONLY that laboratory and its activities—do NOT append intros or snippets of other engineering branches (such as Civil or Mechanical Engineering) simply because they share an acronym or keyword.
     - If asked about courses or engineering branches, list only the verified degree programs offered directly; do NOT divert to faculty speeches, talks, or conference papers.
 
-11. DYNAMIC ADAPTIVE LENGTH & BREVITY:
-    - If the user specifies a length constraint (e.g. "in one line", "in a single sentence", "in 2 points", "briefly", "in detail"), adhere strictly to that exact constraint.
-    - If NO length constraint is given by the user, provide a **crisp, structured, and brief** response (neither overly lengthy nor too brief). Deliver the answer in 2–4 clear bullet points highlighting key entities in **bold**.
+11. DYNAMIC ADAPTIVE LENGTH & LATENCY OPTIMIZATION:
+    - If the user specifies a length constraint or requests all/exhaustive information (e.g. "in one line", "briefly", "in detail", "all of them", "list all professors"), adhere strictly to that instruction. When all items or full details are requested, provide the complete, untruncated answer.
+    - If NO length constraint is given by the user, provide a **crisp, structured, and brief** response (2–4 clear bullet points highlighting key entities in **bold**).
+    - To minimize latency and provide fast answers, be direct and fact-focused. Do NOT generate unnecessary conversational fluff or redundant introductory disclaimers.
 """
 
 
 class GeminiService:
+    _session: Optional[requests.Session] = None
+    _active_model: Optional[str] = None
+    _model_cooldowns: Dict[str, float] = {}
+
+    @classmethod
+    def _get_session(cls) -> requests.Session:
+        if cls._session is None:
+            s = requests.Session()
+            adapter = requests.adapters.HTTPAdapter(
+                pool_connections=10,
+                pool_maxsize=20,
+                max_retries=1
+            )
+            s.mount("https://", adapter)
+            s.mount("http://", adapter)
+            cls._session = s
+        return cls._session
+
     # Known prompt injection patterns
     INJECTION_PATTERNS = [
         r"ignore (all )?(previous|above) (instructions|directions|prompts)",
@@ -139,17 +158,6 @@ class GeminiService:
         r"\b(lanja|lanjamunda|dengey|dengu|donga|otha|omala|thevidiya|poolu|sunni|kena|punda|baadu|moodhevi)\b",
     ]
 
-    # BMSIT relevance keywords
-    BMSIT_KEYWORDS = [
-        "bmsit", "b.m.s", "bms", "college", "campus", "admission", "admissions",
-        "engineering", "course", "courses", "branch", "branches", "cse", "ise", "ece",
-        "mech", "civil", "ai&ml", "aiml", "aids", "fees", "fee", "hostel", "placement",
-        "placements", "faculty", "hod", "principal", "yelahanka", "avalahalli",
-        "vtu", "autonomous", "scholarship", "exam", "syllabus", "sports", "library",
-        "canteen", "bus", "transport", "ranking", "nirf", "naac", "nba", "cutoff",
-        "comedk", "kcet", "management quota", "contact", "email", "phone", "address",
-        "application", "department", "event", "fest", "utsaha"
-    ]
 
     @classmethod
     def check_guardrails(cls, message: str) -> tuple[bool, Optional[str]]:
@@ -303,78 +311,13 @@ class GeminiService:
                     "session_id": session_id
                 }
 
-        # Fast Grounding Guard: If user asks about a specific entity absent from all retrieved chunks, refuse immediately
-        stop_words = {
-            "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
-            "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit",
-            "bms", "college", "institute", "campus", "info", "information", "him", "her", "his",
-            "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
-            "who", "whom", "whose", "have", "has", "had", "give", "list", "please"
-        }
-        generic_words = {
-            "facilitie", "facility", "facilities", "provide", "provided", "available",
-            "detail", "details", "info", "information", "campus", "college", "institute",
-            "student", "students", "tell", "give", "list", "have", "has", "get", "club", "clubs",
-            "center", "centers", "centre", "centres", "cell", "cells", "dept", "department", "departments",
-            "lab", "labs", "laboratory", "laboratories", "committee", "office", "branch", "branches",
-            "course", "courses", "program", "programs", "admission", "admissions", "fee", "fees",
-            "hostel", "hostels", "placement", "placements", "block", "blocks", "building", "hall",
-            "offer", "offered", "study", "studies", "educate", "education", "undergraduate", "postgraduate",
-            "degree", "degrees", "academic", "academics", "seat", "seats", "intake"
-        }
-        formatting_words = {
-            "line", "lines", "point", "points", "bullet", "bullets", "sentence", "sentences",
-            "word", "words", "para", "paras", "paragraph", "paragraphs", "page", "pages",
-            "overview", "summary", "summarize", "brief", "briefly", "short", "long", "detail", "details",
-            "detailed", "explain", "explanation", "describe", "description", "tell", "give",
-            "show", "write", "provide", "share", "highlight", "highlights", "know", "view"
-        }
-        q_raw_words = [
-            w.lower() for w in re.findall(r"\w+", user_message)
-            if w.lower() not in stop_words
-            and w.lower() not in formatting_words
-            and not re.match(r"^\d+(?:line|lines|point|points|bullet|bullets|sentence|sentences|word|words|para|paragraphs?)?$", w.lower())
-            and not w.isdigit()
-            and len(w) > 2
-        ]
-        q_stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in q_raw_words]
-        q_distinguishing = [
-            s for s in q_stems
-            if s not in {"tell", "about", "what", "who", "which", "give", "list", "bmsit", "bms", "college", "institute", "campus", "engineering"}
-            and s not in formatting_words
-        ]
-        q_core_nouns = [s for s in q_distinguishing if s not in generic_words and s not in {"engineering"}]
-
-        is_courses_query = any(k in user_message.lower() for k in ["course", "branch", "program", "stream", "department", "degree"])
-        is_institution_overview = (
-            not q_distinguishing and any(k in user_message.lower() for k in ["bmsit", "bms", "college", "institute", "campus", "institution"])
-        ) or any(phrase in user_message.lower() for phrase in ["about bmsit", "tell about bmsit", "what is bmsit", "overview of bmsit", "bmsit overview"])
-
-        all_text = " ".join(c.get("text", "") for c in retrieved_chunks).lower()
-        if not is_courses_query and not is_institution_overview and q_core_nouns and not any(re.search(r"\b" + re.escape(cn), all_text) for cn in q_core_nouns):
-            subj_title = " ".join(q_distinguishing).title() if q_distinguishing else "this topic"
-            missing_reply = (
-                f"As of now, I don't have verified information regarding **{subj_title}** in the BMSIT knowledge base. "
-                "Please refer to [https://bmsit.ac.in](https://bmsit.ac.in) or contact the college directly:\n"
-                "• **Email**: `admissions@bmsit.in` / `principal@bmsit.in`\n"
-                "• **Phone**: +91-80-68730444 / +91-80-68730424\n"
-                "• **Website**: [https://bmsit.ac.in](https://bmsit.ac.in)\n"
-                "• **Address**: Doddaballapur Main Road, Avalahalli, Yelahanka, Bengaluru - 560064"
-            )
-            history_mgr.append_turn(session_id, user_message, missing_reply)
-            return {
-                "reply": missing_reply,
-                "sources": [],
-                "guardrail_triggered": False,
-                "session_id": session_id
-            }
-
-        # Build context string from top 6 reranked chunks
+        # Build context string from top retrieved chunks
+        top_k = int(getattr(Config, "TOP_K", 10) or 10)
         context_parts = []
         sources = []
         seen_sources = set()
 
-        for chunk in retrieved_chunks[:6]:
+        for chunk in retrieved_chunks[:top_k]:
             source_name = chunk.get("source_name", "BMSIT Document")
             source_type = chunk.get("source_type", "document")
             meta = chunk.get("metadata", {})
@@ -431,6 +374,18 @@ class GeminiService:
         }
 
     @classmethod
+    def _contextualize_query(cls, query: str, conversation_history: Optional[List[dict]] = None) -> str:
+        """
+        Lightweight backward-compatible helper for conversational query contextualization.
+        """
+        history_mgr = LangChainHistoryManager.get_instance()
+        langchain_messages = history_mgr.sync_history("test_session", conversation_history)
+        return QueryRewriter.get_instance().rewrite(
+            query=query,
+            messages=langchain_messages
+        )
+
+    @classmethod
     def _call_gemini_api(
         cls,
         api_key: str,
@@ -439,7 +394,8 @@ class GeminiService:
         history_block: str = ""
     ) -> str:
         """
-        Calls Google Gemini API using direct REST endpoint with production model failover.
+        Calls Google Gemini API using gemini-3.5-flash-lite only via persistent pooled HTTP session.
+        Unlimited max output tokens: lengthy answers are never cut off.
         """
         prompt = f"""{SYSTEM_PROMPT}
 
@@ -451,307 +407,153 @@ USER QUESTION:
 
 ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTLY on the BMSIT context above):"""
 
-        # Priority list of verified, active generation models, honoring GEMINI_MODEL
-        configured = [m.strip() for m in (Config.CHAT_MODELS or []) if m.strip()]
-        primary_model = (getattr(Config, "GEMINI_MODEL", "") or "").strip()
-        models_to_try = []
-        if primary_model and primary_model not in models_to_try:
-            models_to_try.append(primary_model)
-        for m in (configured or ["gemini-3.5-flash", "gemini-3-flash-preview"]):
-            if m not in models_to_try:
-                models_to_try.append(m)
+        session = cls._get_session()
+        model = "gemini-3.5-flash-lite"
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
 
-        last_err = None
-        for m in models_to_try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
-            payload = {
-                "contents": [
-                    {"parts": [{"text": prompt}]}
-                ],
-                "generationConfig": {
-                    "temperature": 0.2,
-                    "maxOutputTokens": 1024
-                }
-            }
-            timeout_sec = float(getattr(Config, "CHAT_TIMEOUT", 15) or 15)
-            try:
-                resp = requests.post(url, json=payload, timeout=timeout_sec)
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    candidates = res_json.get("candidates", [])
-                    if candidates:
-                        parts = candidates[0].get("content", {}).get("parts", [])
-                        texts = [p["text"] for p in parts if isinstance(p, dict) and p.get("text")]
-                        if texts:
-                            return "\n".join(texts).strip()
-                    logger.warning(f"[Gemini] Model {m} returned no text candidates.")
-                    continue
+        generation_config = {
+            "temperature": 0.2,
+        }
+        # Unlimited by default: if MAX_OUTPUT_TOKENS <= 0, maxOutputTokens is omitted so Gemini
+        # generates up to full model capacity (8192+ tokens) without cutting off lengthy answers.
+        max_output_tokens = getattr(Config, "MAX_OUTPUT_TOKENS", 0) or 0
+        if max_output_tokens > 0:
+            generation_config["maxOutputTokens"] = int(max_output_tokens)
 
-                logger.warning(f"[Gemini] Model {m} HTTP {resp.status_code}: {resp.text[:120]}")
-                # If API quota is reached (429) or Google is degraded (503), fail over to next model
-                if resp.status_code in (429, 503):
-                    last_err = RuntimeError(f"Gemini API model {m} unavailable (HTTP {resp.status_code})")
-                    continue
-            except Exception as e:
-                last_err = e
-                logger.warning(f"[Gemini] Model {m} request failed: {e}")
-                continue
+        payload = {
+            "contents": [
+                {"parts": [{"text": prompt}]}
+            ],
+            "generationConfig": generation_config
+        }
+        timeout_sec = float(getattr(Config, "CHAT_TIMEOUT", 45) or 45)
 
-        raise last_err or RuntimeError("No Gemini models responded successfully")
+        resp = session.post(url, json=payload, timeout=timeout_sec)
+        if resp.status_code == 200:
+            res_json = resp.json()
+            candidates = res_json.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                texts = [p["text"] for p in parts if isinstance(p, dict) and p.get("text")]
+                if texts:
+                    return "\n".join(texts).strip()
+            raise RuntimeError(f"Gemini model {model} returned no text candidates.")
+
+        raise RuntimeError(f"Gemini API model {model} returned HTTP {resp.status_code}: {resp.text[:120]}")
 
     @classmethod
     def _synthesize_from_context(cls, query: str, chunks: List[dict]) -> str:
         """
-        Robust extractive synthesis fallback when API key is offline or quota exceeded.
-        Finds matching sentences in retrieved chunks and presents them clearly.
-        Strictly refuses to answer when core query information is absent from context.
-        Laser focused on the specific queried topic without extraneous departments.
-        Adheres to adaptive length constraints (e.g. 'in one line', 'briefly').
+        Extractive synthesis fallback when API key is offline or quota exceeded.
+        Zero hardcoded word lists or static dictionaries.
+        Dynamically extracts query tokens, scores sentences across retrieved chunks,
+        and constructs an accurate, structured answer.
         """
-        q_lower = query.lower()
+        clean_query = (query or "").strip()
+        q_lower = clean_query.lower()
 
-        # Tokenize query into meaningful search terms
-        stop_words = {
-            "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
-            "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "bmsit",
-            "bms", "college", "institute", "campus", "info", "information", "him", "her", "his",
-            "hers", "he", "she", "it", "its", "they", "them", "their", "this", "that", "which",
-            "who", "whom", "whose", "have", "has", "had", "give", "list", "please"
-        }
-        formatting_words = {
-            "line", "lines", "point", "points", "bullet", "bullets", "sentence", "sentences",
-            "word", "words", "para", "paras", "paragraph", "paragraphs", "page", "pages",
-            "overview", "summary", "summarize", "brief", "briefly", "short", "long", "detail", "details",
-            "detailed", "explain", "explanation", "describe", "description", "tell", "give",
-            "show", "write", "provide", "share", "highlight", "highlights", "know", "view"
-        }
-        raw_words = [
-            w.lower() for w in re.findall(r"\w+", query)
-            if w.lower() not in stop_words
-            and w.lower() not in formatting_words
-            and not re.match(r"^\d+(?:line|lines|point|points|bullet|bullets|sentence|sentences|word|words|para|paragraphs?)?$", w.lower())
-            and not w.isdigit()
-            and len(w) > 2
-        ]
-        stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_words]
-        distinguishing_stems = [
-            s for s in stems
-            if s not in {"tell", "about", "what", "who", "which", "give", "list", "bmsit", "bms", "college", "institute", "campus", "engineering"}
-            and s not in formatting_words
-        ]
-        generic_words = {
-            "facilitie", "facility", "facilities", "provide", "provided", "available",
-            "detail", "details", "info", "information", "campus", "college", "institute",
-            "student", "students", "tell", "give", "list", "have", "has", "get", "club", "clubs",
-            "center", "centers", "centre", "centres", "cell", "cells", "dept", "department", "departments",
-            "lab", "labs", "laboratory", "laboratories", "committee", "office", "branch", "branches",
-            "course", "courses", "program", "programs", "admission", "admissions", "fee", "fees",
-            "hostel", "hostels", "placement", "placements", "block", "blocks", "building", "hall",
-            "offer", "offered", "study", "studies", "educate", "education", "undergraduate", "postgraduate",
-            "degree", "degrees", "academic", "academics", "seat", "seats", "intake"
-        }
-        core_nouns = [s for s in distinguishing_stems if s not in generic_words and s not in {"engineering"}]
-
-        # Length constraint flags
-        one_line_requested = bool(re.search(r"\b(one\s+line|single\s+sentence|in\s+short)\b", q_lower))
-        brief_requested = bool(re.search(r"\b(brief|briefly|summary)\b", q_lower))
-        target_lines_match = re.search(r"\b(\d+)\s*(?:line|lines|pt|point|points|bullet|bullets|sentence|sentences)\b", q_lower)
-        target_count = int(target_lines_match.group(1)) if target_lines_match else None
-
-        # Check if query asks for institution overview
-        is_institution_overview = (
-            not distinguishing_stems and any(k in q_lower for k in ["bmsit", "bms", "college", "institute", "campus", "institution"])
-        ) or any(phrase in q_lower for phrase in ["about bmsit", "tell about bmsit", "what is bmsit", "overview of bmsit", "bmsit overview"])
-
-        subject_display = " ".join(distinguishing_stems).title() if distinguishing_stems else "this topic"
         unknown_message = (
-            f"As of now, I don't have verified information regarding **{subject_display}** in the BMSIT knowledge base. "
-            "Please refer to [https://bmsit.ac.in](https://bmsit.ac.in) or contact the college directly:\n"
-            "• **Email**: `admissions@bmsit.in` / `principal@bmsit.in`\n"
+            "As of now, I don't have verified information regarding this in the BMSIT knowledge base. "
+            "Please refer to https://bmsit.ac.in or contact the college directly:\n"
+            "• **Email**: admissions@bmsit.in / principal@bmsit.in\n"
             "• **Phone**: +91-80-68730444 / +91-80-68730424\n"
-            "• **Website**: [https://bmsit.ac.in](https://bmsit.ac.in)\n"
+            "• **Website**: https://bmsit.ac.in\n"
             "• **Address**: Doddaballapur Main Road, Avalahalli, Yelahanka, Bengaluru - 560064"
         )
 
         if not chunks:
             return unknown_message
 
-        # Navigation boilerplate keywords that indicate raw site menus rather than informative sentences
-        nav_boilerplate_tokens = {
-            "notification", "syllabus", "circulars", "brochure", "bus routes",
-            "accreditation", "student clubs", "placements reports", "patents", "mous",
-            "apply now", "fees structure", "counselling", "greenery", "hostels counselling"
-        }
+        # Dynamic token extraction from user query (zero predefined word dictionaries)
+        raw_tokens = [
+            t for t in re.findall(r"\b[a-zA-Z0-9_-]+\b", q_lower)
+            if len(t) >= 3 and not t.isdigit()
+        ]
+        if not raw_tokens:
+            raw_tokens = [t for t in re.findall(r"\b[a-zA-Z0-9_-]+\b", q_lower) if not t.isdigit()]
 
-        # 1. SPECIALIZED PROGRAM EXTRACTION: If user asks for courses / branches offered
-        is_courses_query = any(k in q_lower for k in ["course", "branch", "program", "stream", "department", "degree"])
-        if is_courses_query:
-            all_programs = []
-            for c in chunks:
-                raw_text = c.get("text", "")
-                prog_matches = re.findall(r"([A-Za-z\s&.()]+?)\s+Duration\s+(\d+\s+Years?)\s+Intake\s+(\d+)", raw_text)
-                for prog, dur, intake in prog_matches:
-                    clean_prog = prog.strip().split("Contact")[-1].split("Circulars")[-1].split("Syllabus")[-1].split("Now")[-1].strip()
-                    if clean_prog and len(clean_prog) > 3:
-                        entry = f"**{clean_prog}** (Duration: {dur}, Annual Intake: {intake})"
-                        if entry not in all_programs:
-                            all_programs.append(entry)
+        stems = [
+            t[:-1] if (t.endswith("s") and not t.endswith("ss") and len(t) > 3) else t
+            for t in raw_tokens
+        ]
 
-            if all_programs:
-                if one_line_requested:
-                    progs_summary = ", ".join(p.split("**")[1] for p in all_programs[:6])
-                    return f"BMSIT offers accredited programs including **{progs_summary}**, and more."
-                elif brief_requested:
-                    bullet_list = "\n".join(f"* {p}" for p in all_programs[:6])
-                    return f"**Engineering Branches and Programs Offered at BMSIT:**\n\n{bullet_list}\n\n*(Full details available in official Admissions records)*"
-                else:
-                    ug_progs = [p for p in all_programs if "Master" not in p and "M.Tech" not in p and "MBA" not in p and "MCA" not in p]
-                    pg_progs = [p for p in all_programs if p not in ug_progs]
-                    sections = []
-                    if ug_progs:
-                        sections.append("**Undergraduate (B.E.) Engineering Branches:**\n" + "\n".join(f"* {p}" for p in ug_progs))
-                    if pg_progs:
-                        sections.append("**Postgraduate Programs (M.Tech / MBA / MCA):**\n" + "\n".join(f"* {p}" for p in pg_progs))
-                    return f"Based on BMSIT verified official records (Admissions):\n\n" + "\n\n".join(sections)
+        # Dynamic query constraint parsing
+        lines_match = re.search(r"\b(\d+)\s*(?:line|point|bullet|sentence)s?\b", q_lower)
+        target_count = int(lines_match.group(1)) if lines_match else None
+        one_line_requested = bool(re.search(r"\b(one\s+line|single\s+sentence|in\s+short)\b", q_lower))
+        brief_requested = bool(re.search(r"\b(brief|briefly|summary)\b", q_lower))
 
-        # 2. INSTITUTION OVERVIEW: If user asks for general overview or about BMSIT in N lines/points
-        if is_institution_overview:
-            overview_lines = []
-            seen_snippets = set()
-            for c in chunks:
-                raw_text = c.get("text", "")
-                sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", raw_text) if len(s.strip()) > 20]
-                for s in sentences:
-                    s_lower = s.lower()
-                    if sum(1 for nav in nav_boilerplate_tokens if nav in s_lower) >= 2:
-                        continue
-                    key_indicators = [
-                        "established", "bmsit", "institute", "engineering", "college", "program",
-                        "programme", "autonomous", "vtu", "vision", "mission", "trust", "campus",
-                        "accredit", "naac", "nba", "ranking", "placement", "faculty", "student",
-                        "research", "facility", "facilities", "yelahanka", "bangalore", "bengaluru"
-                    ]
-                    if any(k in s_lower for k in key_indicators):
-                        normalized = re.sub(r"\s+", " ", s.lower()[:60])
-                        if normalized not in seen_snippets:
-                            seen_snippets.add(normalized)
-                            bolded = s
-                            for term in [
-                                "BMS Institute of Technology and Management", "BMSIT&M", "BMSIT",
-                                "VTU", "NAAC", "NBA", "AICTE", "Autonomous", "2002",
-                                "Yelahanka", "Bengaluru", "A+ Grade"
-                            ]:
-                                bolded = re.sub(r"\b" + re.escape(term) + r"\b", f"**{term}**", bolded, flags=re.IGNORECASE)
-                            overview_lines.append(bolded)
-
-            if overview_lines:
-                limit = target_count if target_count is not None else (10 if not brief_requested and not one_line_requested else 3)
-                selected = overview_lines[:limit]
-                if one_line_requested:
-                    return f"**BMSIT&M**: {selected[0]}"
-                bullets = "\n".join(f"* {line}" for line in selected)
-                return (
-                    f"Based on BMSIT verified official records:\n\n"
-                    f"**BMS Institute of Technology and Management (BMSIT&M) Overview:**\n\n"
-                    f"{bullets}\n\n"
-                    f"> *Source: Official BMSIT Institutional Records*"
-                )
-
-        # 3. SPECIFIC TOPIC GROUNDING: Verify core nouns appear in retrieved documents
-        if core_nouns:
-            retrieved_tokens = set(re.findall(r"\b[a-z0-9]+\b", " ".join(c.get("text", "") for c in chunks).lower()))
-            present_nouns = [cn for cn in core_nouns if any(re.search(r"\b" + re.escape(cn), t) for t in retrieved_tokens)]
-            if not present_nouns:
-                return unknown_message
-
-        # Extract sentences from retrieved chunks
         candidate_lines = []
+        seen_snippets = set()
+
         for c in chunks:
             raw_text = c.get("text", "")
-            source_title = c.get("source_name", "BMSIT Official Records")
-            sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", raw_text) if len(s.strip()) > 15]
+            source_title = c.get("source_name", "BMSIT Verified Records")
+            src_lower = source_title.lower()
+            meta = c.get("metadata", {}) or {}
+            ts_str = str(c.get("updated_at") or meta.get("updated_at") or "")
+
+            sentences = [
+                s.strip() for s in re.split(r"(?<=[.!?])\s+|\n+", raw_text)
+                if len(s.strip()) > 15
+            ]
+
             for sentence in sentences:
                 s_lower = sentence.lower()
 
-                # Filter out raw menu / navigation header fragments
-                nav_hits = sum(1 for nav in nav_boilerplate_tokens if nav in s_lower)
-                if nav_hits >= 2:
+                # Dynamic scoring: count query token and stem occurrences
+                hits = sum(1 for st in stems if (st in s_lower or (len(st) >= 4 and st[:4] in s_lower)))
+                if hits == 0:
                     continue
 
-                matches = sum(1 for st in stems if (st in s_lower or (len(st) >= 4 and st[:4] in s_lower)))
+                # Title boost if source name aligns with query
+                title_boost = 1.0 if any(st in src_lower for st in stems) else 0.0
+                score = hits + title_boost
 
-                # Strict Core-Entity Guard: Sentence or source must match the query's core nouns
-                if core_nouns:
-                    has_core = any(
-                        (cn in s_lower or (len(cn) >= 4 and cn[:4] in s_lower) or cn in source_title.lower())
-                        for cn in core_nouns
-                    )
-                    if not has_core:
-                        matches = 0
-                elif distinguishing_stems:
-                    has_core = any(
-                        (ds in s_lower or (len(ds) >= 4 and ds[:4] in s_lower) or ds in source_title.lower())
-                        for ds in distinguishing_stems
-                    )
-                    if not has_core:
-                        matches = 0
+                normalized_snippet = re.sub(r"\s+", " ", s_lower[:80]).strip()
+                if normalized_snippet in seen_snippets:
+                    continue
+                seen_snippets.add(normalized_snippet)
 
-                if matches >= 1:
-                    ts_str = str(c.get("updated_at") or (c.get("metadata") or {}).get("updated_at") or "")
-                    candidate_lines.append((matches, ts_str, sentence, source_title))
+                candidate_lines.append((score, ts_str, sentence, source_title))
 
         if not candidate_lines:
             return unknown_message
 
-        # Sort candidate lines by match score, then recency
+        # Sort candidate lines by score descending, then recency
         candidate_lines.sort(key=lambda x: (x[0], x[1]), reverse=True)
 
-        # Collect verified facts strictly from matching sources
-        # Discard weak spillover sources (e.g. Civil or Mechanical mentioning 'AICTE' when query is about IDEA Lab)
-        max_matches = candidate_lines[0][0]
-        min_allowed_matches = max(1, max_matches - 1) if max_matches <= 2 else 2
-
-        source_sections = {}
-        top_sources = []
-        for match_cnt, _, line, src in candidate_lines:
-            if match_cnt < min_allowed_matches:
-                continue
+        # Group verified lines by source
+        source_sections: Dict[str, List[str]] = {}
+        for _, _, line, src in candidate_lines:
             clean = line.strip()
-            # Clean duplicate heading repeats at start e.g. "AICTE IDEA Lab AICTE IDEA Lab ..."
             clean = re.sub(r"^(?:" + re.escape(src) + r"\s*)+", "", clean, flags=re.IGNORECASE).strip()
             if not clean:
                 clean = line.strip()
             if src not in source_sections:
                 source_sections[src] = []
-                top_sources.append(src)
-            if clean not in source_sections[src] and len(clean) > 20:
+            if clean not in source_sections[src]:
                 source_sections[src].append(clean)
 
         if not source_sections:
             return unknown_message
 
-        # Output formatting with adaptive length (strictly primary source if it answers the query)
-        # If top source has at least 2 verified lines, isolate it exclusively to prevent topic spillover!
-        if top_sources and len(source_sections.get(top_sources[0], [])) >= 2:
-            primary_sources = [top_sources[0]]
-        else:
-            primary_sources = top_sources[:2]
+        # Select lines according to dynamic length constraints
+        limit = target_count if target_count is not None else (1 if one_line_requested else (3 if brief_requested else 6))
 
         output_blocks = []
-        for src in primary_sources:
-            lines = source_sections.get(src, [])
+        for src, lines in source_sections.items():
             if not lines:
                 continue
+            selected_lines = lines[:limit]
             if one_line_requested:
-                output_blocks.append(f"**{src}**: {lines[0]}")
-                break
-            elif brief_requested:
-                top_lines = lines[:2]
-                output_blocks.append(f"**{src}:**\n" + "\n".join(f"* {l}" for l in top_lines))
+                output_blocks.append(f"**{src}**: {selected_lines[0]}")
                 break
             else:
-                top_lines = lines[:3]
-                output_blocks.append(f"**{src}:**\n" + "\n".join(f"* {l}" for l in top_lines))
+                formatted_lines = "\n".join(f"* {l}" for l in selected_lines)
+                output_blocks.append(f"**{src}:**\n{formatted_lines}")
+            if len(output_blocks) >= (1 if brief_requested else 3):
+                break
 
         if not output_blocks:
             return unknown_message
@@ -759,10 +561,9 @@ ANSWER (Provide a direct, accurate, flexible, and helpful response based STRICTL
         if one_line_requested:
             return output_blocks[0]
 
-        src_label = ", ".join(primary_sources)
         formatted_answer = "\n\n".join(output_blocks)
         return (
-            f"Based on BMSIT verified official records ({src_label}):\n\n"
+            f"Based on BMSIT verified official records:\n\n"
             f"{formatted_answer}\n\n"
-            f"> *Source: {src_label}*"
+            f"> *Source: BMSIT Official Records*"
         )

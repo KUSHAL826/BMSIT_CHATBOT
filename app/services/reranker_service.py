@@ -24,12 +24,6 @@ import requests
 
 logger = logging.getLogger(__name__)
 
-STOP_WORDS = {
-    "what", "is", "the", "are", "of", "in", "for", "to", "at", "and", "a", "an", "on",
-    "tell", "me", "about", "can", "you", "does", "when", "where", "how", "do", "did",
-    "bmsit", "bms", "college", "institute", "there", "any", "please", "give", "list"
-}
-
 
 class RerankerService:
     """
@@ -82,9 +76,10 @@ class RerankerService:
         - Penalty for short, boilerplate fragments
         """
         query_lower = query.lower()
+        # Pure dynamic tokens: words with length >= 3 or numbers (zero static word lists)
         raw_terms = [
             w for w in re.findall(r"\w+", query_lower)
-            if w not in STOP_WORDS and (len(w) > 2 or w.isdigit())
+            if len(w) >= 3 or w.isdigit()
         ]
         stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_terms]
 
@@ -118,10 +113,10 @@ class RerankerService:
             title_match = sum(1 for st in stems if st in source_name or st in sec)
             title_score = min(title_match * 0.05, 0.10)
 
-            # 4. Numerical/factual presence (if query asks for fees, cutoffs, dates, or intake)
+            # 4. Numerical/factual presence (dynamically triggered if query or text contains digits or currency symbols)
             numeric_bonus = 0.0
-            has_numeric_query = any(k in query_lower for k in ["fee", "fees", "cost", "cutoff", "intake", "phone", "package", "ctc"])
-            if has_numeric_query and re.search(r"(₹|\b\d{2,6}\b|lpa|inr)", text_lower):
+            has_numeric_query = bool(re.search(r"[\d₹$€%]", query_lower))
+            if has_numeric_query and re.search(r"[\d₹$€%]", text_lower):
                 numeric_bonus = 0.08
 
             # 5. Composite rerank score anchored predominantly on semantic vector similarity
@@ -205,40 +200,44 @@ Passages:
 Output JSON ONLY in this format:
 {{"ranked_indices": [most_relevant_index, second_index, ...]}}"""
 
-        models = ["gemini-3.6-flash", "gemini-3.8-flash", "gemini-flash-latest"]
-        for m in models:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
-            payload = {
-                "contents": [{"parts": [{"text": prompt}]}],
-                "generationConfig": {
-                    "temperature": 0.0,
-                    "responseMimeType": "application/json",
-                    "maxOutputTokens": 100
-                }
-            }
+        try:
+            from app.services.gemini_service import GeminiService
+            session = GeminiService._get_session()
+        except Exception:
+            session = requests.Session()
 
-            try:
-                resp = requests.post(url, json=payload, timeout=6)
-                if resp.status_code == 200:
-                    res_json = resp.json()
-                    candidates_out = res_json.get("candidates", [])
-                    if candidates_out:
-                        parts = candidates_out[0].get("content", {}).get("parts", [])
-                        if parts and parts[0].get("text"):
-                            parsed = json.loads(parts[0]["text"])
-                            ranked_indices = parsed.get("ranked_indices", [])
-                            if isinstance(ranked_indices, list) and ranked_indices:
-                                result = []
-                                seen = set()
-                                for idx in ranked_indices:
-                                    if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen:
-                                        seen.add(idx)
-                                        item = dict(candidates[idx])
-                                        item["rerank_score"] = round(1.0 - (len(result) * 0.05), 3)
-                                        item["score"] = item["rerank_score"]
-                                        result.append(item)
-                                return result
-            except Exception:
-                continue
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key={api_key}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.0,
+                "responseMimeType": "application/json",
+                "maxOutputTokens": 100
+            }
+        }
+
+        try:
+            resp = session.post(url, json=payload, timeout=3.5)
+            if resp.status_code == 200:
+                res_json = resp.json()
+                candidates_out = res_json.get("candidates", [])
+                if candidates_out:
+                    parts = candidates_out[0].get("content", {}).get("parts", [])
+                    if parts and parts[0].get("text"):
+                        parsed = json.loads(parts[0]["text"])
+                        ranked_indices = parsed.get("ranked_indices", [])
+                        if isinstance(ranked_indices, list) and ranked_indices:
+                            result = []
+                            seen = set()
+                            for idx in ranked_indices:
+                                if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen:
+                                    seen.add(idx)
+                                    item = dict(candidates[idx])
+                                    item["rerank_score"] = round(1.0 - (len(result) * 0.05), 3)
+                                    item["score"] = item["rerank_score"]
+                                    result.append(item)
+                            return result
+        except Exception:
+            pass
 
         return None

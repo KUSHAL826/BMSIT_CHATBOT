@@ -64,10 +64,10 @@ _SPEC = {
     "SCHEDULE_TIMEZONE": ("str", "Asia/Kolkata"),
 
     # Chunking
-    "CHUNK_TARGET_TOKENS": ("int", 350),
-    "CHUNK_MAX_TOKENS": ("int", 500),
-    "CHUNK_MIN_TOKENS": ("int", 60),
-    "CHUNK_OVERLAP_TOKENS": ("int", 60),
+    "CHUNK_TARGET_TOKENS": ("int", 550),
+    "CHUNK_MAX_TOKENS": ("int", 750),
+    "CHUNK_MIN_TOKENS": ("int", 80),
+    "CHUNK_OVERLAP_TOKENS": ("int", 110),
 
     # Embeddings
     "EMBED_MODEL": ("str", "gemini-embedding-001"),
@@ -87,10 +87,11 @@ _SPEC = {
     "EMBED_DAILY_TOKEN_BUDGET": ("int", 0),
 
     # Retrieval / chat
-    "TOP_K": ("int", 6),
-    "CHAT_TIMEOUT": ("int", 15),
-    "GEMINI_MODEL": ("str", "gemini-3.5-flash"),
-    "CHAT_MODELS": ("list", "gemini-3.5-flash,gemini-3-flash-preview"),
+    "TOP_K": ("int", 12),
+    "CHAT_TIMEOUT": ("int", 45),
+    "MAX_OUTPUT_TOKENS": ("int", 0),
+    "GEMINI_MODEL": ("str", "gemini-3.5-flash-lite"),
+    "CHAT_MODELS": ("list", "gemini-3.5-flash-lite"),
 
     # Supabase Vector Store
     "SUPABASE_URL": ("str", ""),
@@ -251,6 +252,8 @@ class Config:
     # ------------------------------------------------------------------
     TOP_K = _get("TOP_K")
     CHAT_TIMEOUT = _get("CHAT_TIMEOUT")
+    MAX_OUTPUT_TOKENS = _get("MAX_OUTPUT_TOKENS")
+    GEMINI_MODEL = _get("GEMINI_MODEL")
     CHAT_MODELS = _get("CHAT_MODELS")
 
     # ------------------------------------------------------------------
