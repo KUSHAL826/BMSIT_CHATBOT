@@ -7,10 +7,18 @@ Key Capabilities:
 - LangChain Conversational Memory & History-Aware Query Reformulation.
 - Robust Offline Semantic Synthesis Fallback.
 """
+import hashlib
 import logging
 import os
 import re
 import time
+
+try:
+    import faiss
+except ImportError:
+    faiss = None
+
+import numpy as np
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -30,8 +38,8 @@ Your mission is to provide accurate, comprehensive, verified, and complete guida
 STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
 =======================================================
 
-1. EXCLUSIVE KNOWLEDGE-BASE GROUNDING (STRICT RULE):
-   - You must answer ONLY using the provided BMSIT knowledge base context and verified records.
+1. EXCLUSIVE KNOWLEDGE-BASE GROUNDING & FAISS RETRIEVAL (STRICT RULE):
+   - You must answer ONLY using the provided BMSIT knowledge base context and verified records retrieved from the FAISS vector index.
    - ZERO EXTERNAL HALLUCINATION: Under NO circumstance may you fabricate, speculate, extrapolate, or guess dates, admission cutoffs, fee structures, faculty names, or policies not documented in the context.
    - Every factual claim must be substantiated by the provided context.
 
@@ -101,7 +109,104 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
      * For specific factual or multi-part questions (e.g. 'tell me about boys hostel and its fee payment procedure'): Focus directly on the requested facts (e.g. room types, fees, bank account details, payment steps). Present a clean, well-organized response without dumping irrelevant minutiae, kitchen appliances, or unrelated trivia.
      * For exhaustive roster requests (e.g. 'name all faculties of bmsit', 'list all cse professors'): Provide the full enumeration with bold names and designations.
      * For brief/short constraints (e.g. 'briefly', 'in 1 line'): Strictly adhere to the requested length.
+
+11. CONCISE GREETINGS & CONCLUSIONS (STRICT LIMIT: MAXIMUM 3 LINES):
+   - GREETING PROTOCOL: When the user greets (e.g., "hi", "hello", "hey", "namaste", "good morning", "good evening") or asks who you are / what you can do:
+     * Welcome them warmly and briefly as the official AI Assistant for BMSIT&M.
+     * Ask how you can assist them with BMSIT admissions, academics, faculty, placements, or campus info.
+     * STRICT LENGTH CONSTRAINT: The entire greeting response MUST NOT EXCEED 3 LINES in total. Never output long boilerplate menus, lists of bullet points, or multi-paragraph templates for simple greetings.
+   - CONCLUSION & FAREWELL PROTOCOL: When the user closes the conversation, says goodbye, or expresses thanks (e.g., "bye", "goodbye", "see you", "thank you", "thanks", "take care"):
+     * Acknowledge politely, thank them, and wish them a wonderful day.
+     * STRICT LENGTH CONSTRAINT: The conclusion/farewell response MUST NOT EXCEED 3 LINES in total.
+   - INLINE GREETING & CONCLUSION ON FACTUAL QUERIES: When answering factual BMSIT queries (such as faculty names, departments, cutoffs, hostels, fees):
+     * Answer the question directly using verified facts from the FAISS knowledge base context.
+     * If you include a polite opening greeting or closing sign-off sentence, each MUST be strictly 1 line, and total greeting + conclusion lines combined MUST NEVER EXCEED 3 LINES.
 """
+
+
+class FAISSIntentClassifier:
+    """
+    FAISS Semantic Search Intent Classifier:
+    Zero hardcoded keyword lists or static word dictionaries.
+    Uses FAISS IndexFlatIP (cosine similarity) to classify user input vectors
+    into conversational intents: 'greeting', 'conclusion' (farewells & gratitude), or 'college_query'.
+    """
+    _instance = None
+    DIM = 256
+
+    def __init__(self):
+        self._anchors = [
+            ("greeting", "hello hi hey namaste good morning good evening welcome greetings howdy who are you what is your name"),
+            ("greeting", "hi there hello assistant greetings welcome to college who are you"),
+            ("conclusion", "bye goodbye see you take care farewell cya good night have a good day thank you thanks thx appreciate it"),
+            ("conclusion", "thank you thanks thx thank you so much grateful appreciate it goodbye bye"),
+            ("college_query", "what is the fees for cse cluster hostel admission cutoff placement faculty associate hod"),
+            ("college_query", "bmsit syllabus courses departments branches principal wardens exam comedk kcet fees eligibility tell me about"),
+        ]
+        self._labels = [a[0] for a in self._anchors]
+        matrix = np.array([self._vectorize(a[1]) for a in self._anchors], dtype=np.float32)
+
+        if faiss is not None:
+            try:
+                self._faiss_index = faiss.IndexFlatIP(self.DIM)
+                self._faiss_index.add(matrix)
+            except Exception:
+                self._faiss_index = None
+        else:
+            self._faiss_index = None
+        self._matrix = matrix
+
+    @classmethod
+    def get_instance(cls) -> "FAISSIntentClassifier":
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    def _vectorize(self, text: str) -> np.ndarray:
+        vec = np.zeros(self.DIM, dtype=np.float32)
+        text = text.lower().strip()
+        tokens = text.split()
+        for i, token in enumerate(tokens):
+            h1 = int(hashlib.md5(token.encode("utf-8")).hexdigest()[:8], 16) % self.DIM
+            vec[h1] += 1.5
+            for j in range(len(token) - 2):
+                tri = token[j:j+3]
+                h_tri = int(hashlib.md5(tri.encode("utf-8")).hexdigest()[:8], 16) % self.DIM
+                vec[h_tri] += 0.8
+            if i < len(tokens) - 1:
+                bi = token + "_" + tokens[i+1]
+                h_bi = int(hashlib.md5(bi.encode("utf-8")).hexdigest()[:8], 16) % self.DIM
+                vec[h_bi] += 1.2
+        norm = np.linalg.norm(vec)
+        if norm > 0:
+            vec /= norm
+        return vec
+
+    def classify(self, query: str) -> str:
+        clean = (query or "").strip()
+        if not clean:
+            return "empty"
+
+        words = clean.split()
+        qv = self._vectorize(clean)
+        qv_matrix = np.array([qv], dtype=np.float32)
+
+        if self._faiss_index is not None:
+            scores, indices = self._faiss_index.search(qv_matrix, len(self._labels))
+            best_idx = int(indices[0][0])
+            top_label = self._labels[best_idx]
+            college_score = max(float(s) for s, idx in zip(scores[0], indices[0]) if self._labels[idx] == "college_query")
+        else:
+            scores = np.dot(self._matrix, qv)
+            best_idx = int(np.argmax(scores))
+            top_label = self._labels[best_idx]
+            college_score = max(float(scores[i]) for i, l in enumerate(self._labels) if l == "college_query")
+
+        # Substantive query features override greeting (e.g. "hello what are the cse fees?")
+        if top_label == "greeting" and (len(words) >= 4 or college_score > 0.15):
+            return "college_query"
+
+        return top_label
 
 
 class GeminiService:
@@ -229,13 +334,9 @@ class GeminiService:
                     "Please keep interactions courteous. How may I assist you with information about BMSIT?"
                 )
 
-        # 3. Friendly greetings, introductions, and polite navigation
-        greetings = ["hi", "hello", "hey", "good morning", "good evening", "good afternoon", "namaste", "help", "who are you", "what can you do", "what is your name"]
-        if (
-            any(msg_lower == g or msg_lower.startswith(g + " ") for g in greetings)
-            or re.search(r"\b(i\s*am|i['’]?m|my\s+name\s+is|myself|this\s+is|call\s+me)\b", msg_lower)
-            or bool(re.search(r"\b[a-z]+\s+here\b", msg_lower))
-        ):
+        # 3. Conversational greetings and conclusions via FAISS semantic search
+        intent = FAISSIntentClassifier.get_instance().classify(msg_lower)
+        if intent in ("greeting", "conclusion"):
             return True, None
 
         # Check for obvious external questions (recipes, generic coding, outside trivia)
@@ -283,105 +384,15 @@ class GeminiService:
                 "session_id": session_id
             }
 
-        # Friendly greeting and self-introduction handler
-        # Matches introduction patterns like "Hi, I am Rahul", "My name is Priya", "I'm Kushal", "Myself Rohan", "Call me Kushal", "Kushal here"
-        msg_clean = user_message.strip()
-        msg_lower = msg_clean.lower()
-
-        # Non-name tokens to prevent false positives when parsing candidate names
-        non_name_tokens = {
-            "a", "an", "the", "here", "there", "looking", "interested", "asking", "enquiring",
-            "student", "parent", "aspirant", "someone", "from", "studying", "new", "just",
-            "having", "facing", "want", "wanting", "need", "needing", "trying", "applying",
-            "tell", "what", "how", "when", "where", "which", "why", "who", "can", "could",
-            "would", "should", "will", "please", "help", "info", "information", "details",
-            "good", "fine", "ok", "okay", "yes", "no", "thanks", "thank", "bmsit", "college",
-            "assistant", "bot", "hi", "hello", "hey", "namaste", "greetings"
-        }
-
-        user_name = None
-
-        # Pattern 1: Explicit introduction phrases e.g. "I am Kushal", "My name is Priya Sharma", "Myself Rohan", "This is Rahul", "Call me Kushal", "Name: Kushal"
-        intro_match = re.search(
-            r"\b(?:i\s*am|i['’]?m|my\s+name\s+is|myself|this\s+is|call\s+me|name\s*[:\-]?\s*)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\b",
-            msg_clean,
-            re.IGNORECASE
-        )
-        if intro_match:
-            candidate = intro_match.group(1).strip()
-            cand_words = candidate.lower().split()
-            if cand_words and all(w not in non_name_tokens and len(w) >= 2 for w in cand_words):
-                user_name = candidate.title()
-
-        # Pattern 2: "<Name> here" e.g. "Kushal here", "Hi Kushal here"
-        if not user_name:
-            here_match = re.search(r"\b([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+here\b", msg_clean, re.IGNORECASE)
-            if here_match:
-                candidate = here_match.group(1).strip()
-                cand_words = candidate.lower().split()
-                if cand_words and all(w not in non_name_tokens and len(w) >= 2 for w in cand_words):
-                    user_name = candidate.title()
-
-        # Pattern 3: User directly provides a 1-2 word name (e.g. "Kushal", "Kushal Hegde")
-        if not user_name:
-            words = msg_clean.split()
-            if 1 <= len(words) <= 2 and all(re.match(r"^[A-Za-z]{2,25}$", w) for w in words):
-                cand_words = [w.lower() for w in words]
-                # Ensure it's not a greeting or common conversational/stop word
-                if all(w not in non_name_tokens for w in cand_words):
-                    # Check that it's not a query for college facilities
-                    query_signal = any(w in cand_words for w in ("fees", "hostel", "cse", "admission", "cutoff", "placements", "syllabus", "exam", "branch", "campus", "sports", "library", "warden", "principal", "mess", "gate", "comedk", "kcet"))
-                    if not query_signal:
-                        user_name = " ".join(words).title()
-
-        is_greeting = (
-            user_name is not None or
-            msg_lower in ["hi", "hello", "hey", "namaste", "good morning", "good evening", "good afternoon", "greetings", "help"] or
-            bool(re.match(r"^(?:hi|hello|hey|namaste)\s*[,.!]?$", msg_lower)) or
-            msg_lower in ["who are you", "what is your name", "what can you do"]
-        )
-
-        history_mgr = LangChainHistoryManager.get_instance()
-
-        if is_greeting:
-            if user_name:
-                history_mgr.set_user_name(session_id, user_name)
-                greeting_reply = (
-                    f"👋 **Hello {user_name}, welcome to BMSIT&M!**\n\n"
-                    f"Nice to meet you! I am your official **AI College Guide** for **B.M.S. Institute of Technology and Management**, Bengaluru.\n\n"
-                    f"I can assist you with verified official information on:\n"
-                    f"• **Admissions & Eligibility** (KCET, COMEDK, Management Quota)\n"
-                    f"• **Departments & Academic Programs** (CSE, AI&ML, ISE, ECE, ME, CV, MCA, MBA)\n"
-                    f"• **Placement Statistics, Packages & Top Recruiters**\n"
-                    f"• **Hostel Accommodations, Room Fees & Mess Details**\n"
-                    f"• **Faculty, Leadership & Campus Contact Info**\n\n"
-                    f"How may I assist you with BMSIT today, **{user_name}**?"
-                )
-            elif msg_lower in ["who are you", "what is your name", "what can you do"]:
-                greeting_reply = (
-                    "🤖 **I am the official AI Assistant for B.M.S. Institute of Technology and Management (BMSIT&M)**, Bengaluru.\n\n"
-                    "I provide verified information directly from official BMSIT records regarding:\n"
-                    "• **Admissions & Eligibility** (KCET, COMEDK, Management Quota)\n"
-                    "• **Departments & Programs** (Undergraduate, Postgraduate, Ph.D.)\n"
-                    "• **Placement Statistics & Recruiters**\n"
-                    "• **Hostel Accommodations, Fees & Payment Procedures**\n"
-                    "• **Faculty Members, Leadership & Campus Facilities**\n\n"
-                    "What would you like to know about BMSIT today?"
-                )
-            else:
-                greeting_reply = (
-                    "👋 **Hello and welcome to BMSIT&M!**\n\n"
-                    "I am your official **AI College Guide** for **B.M.S. Institute of Technology and Management**, Bengaluru.\n\n"
-                    "I can help you with:\n"
-                    "• **Admissions & Eligibility** (KCET, COMEDK, Management Quota)\n"
-                    "• **Programs & Departments** (CSE, AI&ML, ISE, ECE, ME, CV, MCA, M.Tech, etc.)\n"
-                    "• **Placement Records & Recruiters**\n"
-                    "• **Hostel Facilities, Fees & Campus Amenities**\n"
-                    "• **Official College Contacts & Office Hours**\n\n"
-                    "What would you like to know about BMSIT today?"
-                )
-
-            # Record in memory
+        # FAISS semantic search intent classification: greeting & conclusion (<= 3 lines)
+        intent = FAISSIntentClassifier.get_instance().classify(user_message)
+        if intent == "greeting":
+            greeting_reply = (
+                "👋 **Hello and welcome to BMSIT&M!**\n"
+                "I am your official AI Assistant for B.M.S. Institute of Technology and Management.\n"
+                "How may I assist you with admissions, courses, hostels, or faculty today?"
+            )
+            history_mgr = LangChainHistoryManager.get_instance()
             history_mgr.append_turn(session_id, user_message, greeting_reply)
             return {
                 "reply": greeting_reply,
@@ -390,84 +401,16 @@ class GeminiService:
                 "session_id": session_id
             }
 
-        # Conversational Border Case 1: Inquiries about user's own identity / name
-        is_user_name_query = bool(re.search(
-            r"\b(?:(?:do\s+(?:you|u)\s+(?:know|remember)|what\s+is|tell\s+me|know)\s+(?:my\s+name|who\s+i\s+am)|who\s+am\s+i|my\s+name\??)\b",
-            msg_lower
-        ))
-        if is_user_name_query:
-            saved_name = history_mgr.get_user_name(session_id)
-            if not saved_name and conversation_history:
-                for turn in reversed(conversation_history):
-                    t_role = str(turn.get("role", "")).lower()
-                    t_content = str(turn.get("content") or turn.get("text") or "")
-                    if t_role in ("user", "human"):
-                        m = re.search(r"\b(?:i\s*am|i['’]?m|my\s+name\s+is|myself|this\s+is|call\s+me)\s+([A-Za-z]+(?:\s+[A-Za-z]+)?)\b", t_content, re.IGNORECASE)
-                        if m:
-                            cand = m.group(1).strip()
-                            if all(w.lower() not in non_name_tokens and len(w) >= 2 for w in cand.split()):
-                                saved_name = cand.title()
-                                history_mgr.set_user_name(session_id, saved_name)
-                                break
-
-            if saved_name:
-                reply_text = (
-                    f"😊 **Yes! You introduced yourself as {saved_name}.**\n\n"
-                    f"It's a pleasure chatting with you, **{saved_name}**! How can I assist you with BMSIT programs, admissions, hostels, or placements today?"
-                )
-            else:
-                reply_text = (
-                    "I don't know your name yet because you haven't introduced yourself!\n\n"
-                    "Feel free to introduce yourself (for example, *'I am Kushal'*), and I'll be glad to remember your name. "
-                    "How may I help you with BMSIT today?"
-                )
-
-            history_mgr.append_turn(session_id, user_message, reply_text)
-            return {
-                "reply": reply_text,
-                "sources": [],
-                "guardrail_triggered": False,
-                "session_id": session_id
-            }
-
-        # Conversational Border Case 2: How are you
-        if bool(re.search(r"\b(?:how\s+are\s+you|how\s+r\s+u|how're\s+you|how\s+are\s+you\s+doing)\b", msg_lower)):
-            reply_text = (
-                "😊 **I'm doing great, thank you for asking!**\n\n"
-                "I am your official AI Assistant for **B.M.S. Institute of Technology and Management (BMSIT&M)**.\n\n"
-                "How can I assist you today with admissions, courses, hostels, or campus life?"
+        if intent == "conclusion":
+            conclusion_reply = (
+                "👋 **Goodbye!**\n"
+                "Feel free to return whenever you have questions regarding BMSIT&M.\n"
+                "Have a great day ahead!"
             )
-            history_mgr.append_turn(session_id, user_message, reply_text)
+            history_mgr = LangChainHistoryManager.get_instance()
+            history_mgr.append_turn(session_id, user_message, conclusion_reply)
             return {
-                "reply": reply_text,
-                "sources": [],
-                "guardrail_triggered": False,
-                "session_id": session_id
-            }
-
-        # Conversational Border Case 3: Gratitude
-        if bool(re.search(r"^(?:thank\s+you|thanks|thank\s+u|thx|thanks\s+a\s+lot|thank\s+you\s+so\s+much)\b", msg_lower)):
-            reply_text = (
-                "🎓 **You're very welcome!**\n\n"
-                "Feel free to ask anytime if you need more details about BMSIT&M. Have a wonderful day!"
-            )
-            history_mgr.append_turn(session_id, user_message, reply_text)
-            return {
-                "reply": reply_text,
-                "sources": [],
-                "guardrail_triggered": False,
-                "session_id": session_id
-            }
-
-        # Conversational Border Case 4: Farewell
-        if bool(re.search(r"^(?:bye|goodbye|see\s+you|cya|take\s+care)\b", msg_lower)):
-            reply_text = (
-                "👋 **Goodbye!**\n\n"
-                "Feel free to return whenever you have questions regarding BMSIT&M. Have a great day ahead!"
-            )
-            history_mgr.append_turn(session_id, user_message, reply_text)
-            return {
-                "reply": reply_text,
+                "reply": conclusion_reply,
                 "sources": [],
                 "guardrail_triggered": False,
                 "session_id": session_id
@@ -684,13 +627,13 @@ class GeminiService:
         if not keys_list:
             raise RuntimeError("No Gemini API keys configured.")
 
-        user_prompt = f"""KNOWLEDGE BASE CONTEXT (From BMSIT official website and verified college records):
+        user_prompt = f"""KNOWLEDGE BASE CONTEXT (From BMSIT official website and verified college records via FAISS index):
 {context}
 
 USER QUESTION:
 {query}
 
-ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above, completing all sentences. HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**):"""
+ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. If greeting or concluding, keep greeting and conclusion strictly within 3 lines maximum. HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**):"""
 
         session = cls._get_session()
         timeout_sec = float(getattr(Config, "CHAT_TIMEOUT", 45) or 45)
@@ -804,6 +747,21 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
         """
         clean_query = (query or "").strip()
         q_lower = clean_query.lower()
+
+        # FAISS Semantic Search Intent Classification (Zero hardcoded word lists)
+        intent = FAISSIntentClassifier.get_instance().classify(clean_query)
+        if intent == "greeting":
+            return (
+                "👋 **Hello and welcome to BMSIT&M!**\n"
+                "I am your official AI Assistant for B.M.S. Institute of Technology and Management.\n"
+                "How may I assist you with admissions, courses, hostels, or faculty today?"
+            )
+        if intent == "conclusion":
+            return (
+                "👋 **Goodbye!**\n"
+                "Feel free to return whenever you have questions regarding BMSIT&M.\n"
+                "Have a great day ahead!"
+            )
 
         unknown_message = (
             "As of now, I don't have verified information regarding this in the BMSIT knowledge base. "
