@@ -2,7 +2,7 @@ name: Keep Alive Render & Supabase
 
 on:
   schedule:
-    # 1:27 PM IST = 07:57 UTC, every Tuesday and Friday
+    # 1:27 PM IST (07:57 UTC), every Tuesday and Friday
     - cron: '57 7 * * 2,5'
   workflow_dispatch:
 
@@ -17,17 +17,14 @@ jobs:
 
     steps:
       # ==========================================
-      # STEP 1: PING RENDER
+      # STEP 1: RENDER HEALTH CHECK
       # ==========================================
-      - name: Ping Render Health Endpoint
+      - name: Check Render Health
         env:
           RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
         shell: bash
         run: |
-          echo "=========================================="
-          echo "STEP 1: Render Health Check"
-          echo "Time (UTC): $(date -u)"
-          echo "=========================================="
+          echo "STEP 1: Checking Render..."
 
           if [ -z "$RENDER_APP_URL" ]; then
             echo "WARNING: RENDER_APP_URL is not configured."
@@ -36,147 +33,88 @@ jobs:
 
           RENDER_URL="${RENDER_APP_URL%/}/healthz"
 
-          if HTTP_CODE=$(curl -sS -L \
+          HTTP_CODE=$(curl -s -L \
             --connect-timeout 10 \
-            --max-time 30 \
+            --max-time 25 \
             --retry 2 \
-            -o /tmp/render_response.txt \
+            --retry-all-errors \
+            -o /dev/null \
             -w "%{http_code}" \
-            "$RENDER_URL"); then
+            "$RENDER_URL" || true)
 
-            echo "Render HTTP status: $HTTP_CODE"
-
-            if [ "$HTTP_CODE" = "200" ]; then
-              echo "SUCCESS: Render health endpoint responded."
-            else
-              echo "WARNING: Render returned HTTP $HTTP_CODE."
-            fi
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "SUCCESS: Render is responding."
           else
-            echo "WARNING: Render health endpoint could not be reached."
+            echo "WARNING: Render returned HTTP ${HTTP_CODE:-000}."
           fi
 
       # ==========================================
-      # STEP 2: VERIFY SUPABASE TABLE
+      # STEP 2: SUPABASE DATABASE CHECK
       # ==========================================
-      - name: Verify Supabase Database Query
+      - name: Verify Supabase Database
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           SUPABASE_TABLE: ${{ secrets.SUPABASE_TABLE }}
         shell: bash
         run: |
-          set -uo pipefail
+          set -euo pipefail
 
-          echo ""
-          echo "=========================================="
-          echo "STEP 2: Supabase Database Verification"
-          echo "Time (UTC): $(date -u)"
-          echo "=========================================="
+          echo "STEP 2: Checking Supabase database..."
 
-          # Check required secrets
-          if [ -z "$SUPABASE_URL" ]; then
-            echo "ERROR: SUPABASE_URL is missing."
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
+            echo "ERROR: Supabase URL or key is missing."
             exit 1
           fi
 
-          if [ -z "$SUPABASE_KEY" ]; then
-            echo "ERROR: SUPABASE_KEY is missing."
-            exit 1
-          fi
-
-          # Remove a trailing slash from the project URL
           SUPABASE_URL="${SUPABASE_URL%/}"
-
-          # Default table is vectors
           TABLE="${SUPABASE_TABLE:-vectors}"
 
-          # Validate table name to prevent URL injection
           if [[ ! "$TABLE" =~ ^[a-zA-Z_][a-zA-Z0-9_]*$ ]]; then
-            echo "ERROR: Invalid SUPABASE_TABLE value."
+            echo "ERROR: Invalid table name."
             exit 1
           fi
 
-          echo "Supabase URL: $SUPABASE_URL"
-          echo "Table: $TABLE"
-          echo "Testing DNS resolution..."
+          echo "Checking database connectivity..."
 
-          HOST=$(printf '%s' "$SUPABASE_URL" |
-            sed -E 's#^https?://([^/]+).*#\1#')
+          # Read only the ID of one row.
+          # Discard the response body to avoid printing database data.
+          PING_URL="${SUPABASE_URL}/rest/v1/${TABLE}?select=id&limit=1"
 
-          if [ -z "$HOST" ]; then
-            echo "ERROR: SUPABASE_URL is not a valid HTTP(S) URL."
-            exit 1
-          fi
-
-          if ! getent hosts "$HOST"; then
-            echo "WARNING: DNS lookup failed on the first attempt."
-            echo "The hostname may be unavailable or the project may be paused."
-          else
-            echo "SUCCESS: Supabase hostname resolved."
-          fi
-
-          # Query one row from the actual table.
-          # This verifies access to the table, not just the API root.
-          PING_URL="${SUPABASE_URL}/rest/v1/${TABLE}?select=*&limit=1"
-          RESPONSE_FILE="$(mktemp)"
-          HTTP_CODE="000"
-
-          echo ""
-          echo "Sending authenticated query to Supabase..."
-          echo "Retries: up to 3 attempts after the initial request."
-
-          if HTTP_CODE=$(curl -sS \
+          HTTP_CODE=$(curl -s \
             --connect-timeout 10 \
-            --max-time 30 \
+            --max-time 25 \
             --retry 3 \
             --retry-all-errors \
-            --retry-delay 5 \
+            --retry-delay 3 \
             -H "apikey: ${SUPABASE_KEY}" \
             -H "Authorization: Bearer ${SUPABASE_KEY}" \
             -H "Accept: application/json" \
-            -o "$RESPONSE_FILE" \
+            -o /dev/null \
             -w "%{http_code}" \
-            "$PING_URL"); then
+            "$PING_URL" || true)
 
-            echo "HTTP status: $HTTP_CODE"
+          echo "Supabase HTTP status: ${HTTP_CODE:-000}"
 
-            if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
-              echo "SUCCESS: Supabase accepted the database query."
-              echo "SUCCESS: Table '$TABLE' is accessible."
-              echo "Response preview (maximum 500 characters):"
-              head -c 500 "$RESPONSE_FILE"
-              echo ""
-              echo "DATABASE CHECK PASSED."
-              rm -f "$RESPONSE_FILE"
-            else
-              echo "ERROR: Supabase returned HTTP $HTTP_CODE."
-              echo "Response details (maximum 1000 characters):"
-              head -c 1000 "$RESPONSE_FILE"
-              echo ""
-              rm -f "$RESPONSE_FILE"
-              exit 1
-            fi
-
+          if [[ "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+            echo "SUCCESS: Supabase database is reachable."
+            echo "SUCCESS: Table '${TABLE}' query completed."
           else
-            CURL_EXIT=$?
-            echo "ERROR: Supabase request failed."
-            echo "curl exit code: $CURL_EXIT"
-            echo "HTTP status: ${HTTP_CODE:-000}"
-            echo "Check DNS, project status, URL, network and timeout."
-            rm -f "$RESPONSE_FILE"
+            echo "ERROR: Supabase database check failed."
+            echo "Check project status, URL, API key and table permissions."
             exit 1
           fi
 
       # ==========================================
-      # STEP 3: FINAL SUMMARY
+      # STEP 3: SUMMARY
       # ==========================================
-      - name: Verification Summary
+      - name: Final Status
         if: success()
         shell: bash
         run: |
-          echo "=========================================="
-          echo "KEEP-ALIVE WORKFLOW COMPLETED"
+          echo "=================================="
+          echo "KEEP-ALIVE CHECK COMPLETED"
           echo "Render health check completed."
-          echo "Supabase table query succeeded."
-          echo "Time (UTC): $(date -u)"
-          echo "=========================================="
+          echo "Supabase database query succeeded."
+          echo "No database rows were printed."
+          echo "=================================="
