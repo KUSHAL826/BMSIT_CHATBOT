@@ -2,73 +2,368 @@ name: Scheduled BMSIT Web Scrape & Ingestion
 
 on:
   schedule:
-    # Runs every Friday at 12:43 PM IST (07:13 UTC)
+    # Every Friday at 12:43 PM IST (07:13 UTC)
     - cron: '13 7 * * 5'
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: bmsit-web-scrape
+  cancel-in-progress: false
+
 jobs:
   scrape-and-index:
-    name: Run Delta Web Scraper
+    name: Run BMSIT Delta Scraper
     runs-on: ubuntu-latest
+    timeout-minutes: 200
+
     steps:
-      - name: Wake Up Render App (Pre-Wake Step)
+      # ==========================================
+      # STEP 1: VALIDATE CONFIGURATION
+      # ==========================================
+      - name: Validate Configuration
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        shell: bash
         run: |
-          if [ -z "${{ secrets.RENDER_APP_URL }}" ]; then
-            echo "Error: RENDER_APP_URL secret is missing!"
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "BMSIT SCRAPER: CONFIGURATION CHECK"
+          echo "Time (UTC): $(date -u)"
+          echo "=========================================="
+
+          if [ -z "$RENDER_APP_URL" ]; then
+            echo "ERROR: RENDER_APP_URL secret is missing."
             exit 1
           fi
 
-          echo "Waking up Render web service (allowing up to 3 minutes for cold start)..."
-          curl -sS -I --max-time 180 --retry 5 --retry-delay 5 "${{ secrets.RENDER_APP_URL }}/healthz" || echo "Pre-wake ping sent"
+          if [ -z "$ADMIN_PASSWORD" ]; then
+            echo "ERROR: ADMIN_PASSWORD secret is missing."
+            echo "Add it under GitHub Settings > Secrets and variables > Actions."
+            exit 1
+          fi
 
-      - name: Trigger Scraper Endpoint
+          RENDER_APP_URL="${RENDER_APP_URL%/}"
+
+          if [[ ! "$RENDER_APP_URL" =~ ^https?:// ]]; then
+            echo "ERROR: RENDER_APP_URL must start with http:// or https://."
+            exit 1
+          fi
+
+          echo "Configuration validated."
+          echo "Render URL is configured."
+          echo "Admin credential is configured."
+          echo "Credentials will not be printed."
+
+      # ==========================================
+      # STEP 2: WAKE RENDER
+      # ==========================================
+      - name: Wake Render Application
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+        shell: bash
         run: |
-          ADMIN_PWD="${{ secrets.ADMIN_PASSWORD }}"
-          [ -z "$ADMIN_PWD" ] && ADMIN_PWD="admin123"
+          set -euo pipefail
 
-          echo "Triggering BMSIT website delta scrape..."
-          RESPONSE=$(curl -sS --max-time 60 --retry 3 --retry-delay 5 -X POST "${{ secrets.RENDER_APP_URL }}/api/admin/scrape" \
-            -H "X-Admin-Key: $ADMIN_PWD")
-          echo "Response: $RESPONSE"
+          RENDER_APP_URL="${RENDER_APP_URL%/}"
+          HEALTH_URL="${RENDER_APP_URL}/healthz"
 
-      - name: Keep Render Awake & Poll Until Scraping Completes
+          echo "=========================================="
+          echo "STEP 1: RENDER HEALTH CHECK"
+          echo "=========================================="
+          echo "Checking whether the Render application responds."
+          echo "A cold start may take time."
+
+          HTTP_CODE="000"
+
+          for ATTEMPT in 1 2 3 4 5; do
+            echo "Health check attempt $ATTEMPT/5..."
+
+            HTTP_CODE=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 45 \
+              -o /dev/null \
+              -w "%{http_code}" \
+              "$HEALTH_URL" 2>/dev/null) || HTTP_CODE="000"
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "SUCCESS: Render health endpoint returned HTTP 200."
+              break
+            fi
+
+            echo "Render response: HTTP $HTTP_CODE"
+
+            if [ "$ATTEMPT" -lt 5 ]; then
+              echo "Waiting 15 seconds before retrying..."
+              sleep 15
+            fi
+          done
+
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "ERROR: Render did not return HTTP 200."
+            echo "The scraper will not be triggered."
+            exit 1
+          fi
+
+      # ==========================================
+      # STEP 3: START THE SCRAPER
+      # ==========================================
+      - name: Trigger BMSIT Delta Scraper
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        shell: bash
         run: |
-          ADMIN_PWD="${{ secrets.ADMIN_PASSWORD }}"
-          [ -z "$ADMIN_PWD" ] && ADMIN_PWD="admin123"
+          set -euo pipefail
 
-          echo "Monitoring scraper status and keeping Render awake..."
-          
-          # Wait 10 seconds before first check
-          sleep 10
+          RENDER_APP_URL="${RENDER_APP_URL%/}"
+          SCRAPE_URL="${RENDER_APP_URL}/api/admin/scrape"
+          RESPONSE_FILE="$(mktemp)"
 
-          # Increased poll limit to 240 checks (240 * 45s = ~3 hours max execution for 1,000+ pages)
+          trap 'rm -f "$RESPONSE_FILE"' EXIT
+
+          echo "=========================================="
+          echo "STEP 2: STARTING BMSIT SCRAPER"
+          echo "=========================================="
+          echo "Sending authenticated POST request..."
+          echo "Endpoint: /api/admin/scrape"
+
+          HTTP_CODE=$(curl -sS \
+            --connect-timeout 10 \
+            --max-time 60 \
+            --retry 2 \
+            --retry-delay 5 \
+            -X POST \
+            -H "X-Admin-Key: ${ADMIN_PASSWORD}" \
+            -H "Accept: application/json" \
+            -o "$RESPONSE_FILE" \
+            -w "%{http_code}" \
+            "$SCRAPE_URL") || {
+              echo "ERROR: Could not reach the scraper endpoint."
+              exit 1
+            }
+
+          echo "Scraper endpoint HTTP status: $HTTP_CODE"
+
+          if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+            echo "ERROR: Scraper start request was rejected or failed."
+            echo "Response details (first 1000 characters):"
+            head -c 1000 "$RESPONSE_FILE" || true
+            echo ""
+            exit 1
+          fi
+
+          echo "SUCCESS: The endpoint accepted the request."
+          echo "Start response (first 500 characters):"
+          head -c 500 "$RESPONSE_FILE" || true
+          echo ""
+
+          echo "The next step will verify actual scraper progress."
+
+      # ==========================================
+      # STEP 4: MONITOR SCRAPER PROGRESS
+      # ==========================================
+      - name: Monitor Scraping and Indexing
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RENDER_APP_URL="${RENDER_APP_URL%/}"
+          STATUS_URL="${RENDER_APP_URL}/api/admin/scrape/status"
+
           MAX_CHECKS=240
+          INTERVAL_SECONDS=45
           CHECK_COUNT=0
 
-          while [ $CHECK_COUNT -lt $MAX_CHECKS ]; do
-            STATUS_JSON=$(curl -sS "${{ secrets.RENDER_APP_URL }}/api/admin/scrape/status" \
-              -H "X-Admin-Key: $ADMIN_PWD")
-            
-            PHASE=$(echo "$STATUS_JSON" | grep -o '"phase":\s*"[^"]*"' | cut -d'"' -f4 || echo "unknown")
-            MSG=$(echo "$STATUS_JSON" | grep -o '"status_message":\s*"[^"]*"' | cut -d'"' -f4 || echo "")
-            PAGES=$(echo "$STATUS_JSON" | grep -o '"pages_scraped":\s*[0-9]*' | cut -d':' -f2 | tr -d ' ' || echo "0")
-            TOTAL=$(echo "$STATUS_JSON" | grep -o '"total_target":\s*[0-9]*' | cut -d':' -f2 | tr -d ' ' || echo "1000")
-            
-            echo "[Check $CHECK_COUNT/$MAX_CHECKS] Crawled: $PAGES/$TOTAL pages | Phase: [$PHASE] | Detail: $MSG"
+          STATUS_FILE="$(mktemp)"
+          trap 'rm -f "$STATUS_FILE"' EXIT
 
-            # Check if is_running is true
-            IS_RUNNING=$(echo "$STATUS_JSON" | grep -o '"is_running":\s*true' || true)
+          echo "=========================================="
+          echo "STEP 3: SCRAPER PROGRESS MONITOR"
+          echo "=========================================="
+          echo "Status endpoint: /api/admin/scrape/status"
+          echo "Polling interval: ${INTERVAL_SECONDS} seconds"
+          echo "Maximum checks: ${MAX_CHECKS}"
+          echo "Approximate monitoring window: 3 hours"
+          echo ""
 
-            if [ -z "$IS_RUNNING" ]; then
-              echo "============================================================"
-              echo " SUCCESS: Full 1,000-page scrape & vector indexing completed!"
-              echo " Final Status: Phase=[$PHASE] | Pages Scraped=$PAGES/$TOTAL"
-              echo "============================================================"
+          while [ "$CHECK_COUNT" -lt "$MAX_CHECKS" ]; do
+            CHECK_COUNT=$((CHECK_COUNT + 1))
+
+            HTTP_CODE=$(curl -sS \
+              --connect-timeout 10 \
+              --max-time 30 \
+              -H "X-Admin-Key: ${ADMIN_PASSWORD}" \
+              -H "Accept: application/json" \
+              -o "$STATUS_FILE" \
+              -w "%{http_code}" \
+              "$STATUS_URL") || {
+                echo "ERROR: Status request failed at check $CHECK_COUNT."
+                exit 1
+              }
+
+            if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+              echo "ERROR: Status endpoint returned HTTP $HTTP_CODE."
+              echo "Response details (first 500 characters):"
+              head -c 500 "$STATUS_FILE" || true
+              echo ""
+              exit 1
+            fi
+
+            # Parse the expected JSON fields without printing the full response.
+            if ! mapfile -t FIELDS < <(
+              python3 - "$STATUS_FILE" <<'PY'
+          import json
+          import sys
+
+          try:
+              with open(sys.argv[1], encoding="utf-8") as f:
+                  data = json.load(f)
+
+              if not isinstance(data, dict):
+                  raise ValueError("Expected a JSON object")
+
+              def value(key, default=""):
+                  v = data.get(key, default)
+                  if v is None:
+                      return default
+                  return str(v).replace("\t", " ").replace("\n", " ")
+
+              running = data.get("is_running")
+              if not isinstance(running, bool):
+                  raise ValueError("Missing or invalid is_running field")
+
+              print(str(running).lower())
+              print(value("phase", "unknown"))
+              print(value("status_message", "No status message"))
+              print(value("pages_scraped", "0"))
+              print(value("total_target", "unknown"))
+              print(value("error", ""))
+
+          except Exception as e:
+              print("STATUS_JSON_ERROR", file=sys.stderr)
+              print(f"Could not parse scraper status: {e}", file=sys.stderr)
+              sys.exit(1)
+          PY
+            ); then
+              echo "ERROR: Could not parse scraper status JSON."
+              exit 1
+            fi
+
+            if [ "${#FIELDS[@]}" -ne 6 ]; then
+              echo "ERROR: Scraper status response is incomplete."
+              exit 1
+            fi
+
+            IS_RUNNING="${FIELDS[0]}"
+            PHASE="${FIELDS[1]}"
+            MESSAGE="${FIELDS[2]}"
+            PAGES="${FIELDS[3]}"
+            TOTAL="${FIELDS[4]}"
+            ERROR_MESSAGE="${FIELDS[5]}"
+
+            echo "------------------------------------------"
+            echo "Check: $CHECK_COUNT/$MAX_CHECKS"
+            echo "Time (UTC): $(date -u)"
+            echo "Running: $IS_RUNNING"
+            echo "Phase: $PHASE"
+            echo "Progress: $PAGES/$TOTAL pages"
+            echo "Details: $MESSAGE"
+            echo "------------------------------------------"
+
+            PHASE_LOWER=$(printf '%s' "$PHASE" | tr '[:upper:]' '[:lower:]')
+
+            # Explicit failure states
+            case "$PHASE_LOWER" in
+              failed|failure|error|cancelled|canceled)
+                echo "ERROR: Scraper reported a failure."
+                if [ -n "$ERROR_MESSAGE" ]; then
+                  echo "Reported error: $ERROR_MESSAGE"
+                fi
+                exit 1
+                ;;
+            esac
+
+            if [ "$IS_RUNNING" = "true" ]; then
+              echo "Scraper is still running."
+              echo "Waiting ${INTERVAL_SECONDS} seconds for the next update..."
+              sleep "$INTERVAL_SECONDS"
+              continue
+            fi
+
+            # A stopped scraper is not automatically a successful scraper.
+            case "$PHASE_LOWER" in
+              completed|complete|success|succeeded|finished|done)
+                echo "SUCCESS: Scraper reports successful completion."
+                echo "Final progress: $PAGES/$TOTAL pages."
+                echo "Review ingestion/indexing metrics if available."
+                exit 0
+                ;;
+            esac
+
+            # Fallback success condition: target reached, if numeric.
+            if [[ "$PAGES" =~ ^[0-9]+$ ]] &&
+               [[ "$TOTAL" =~ ^[0-9]+$ ]] &&
+               [ "$TOTAL" -gt 0 ] &&
+               [ "$PAGES" -ge "$TOTAL" ]; then
+              echo "SUCCESS: Scraped page count reached the reported target."
+              echo "Final progress: $PAGES/$TOTAL pages."
               exit 0
             fi
 
-            CHECK_COUNT=$((CHECK_COUNT+1))
-            sleep 45
+            echo "ERROR: Scraper is no longer running, but success is not confirmed."
+            echo "Final phase: $PHASE"
+            echo "Final progress: $PAGES/$TOTAL pages."
+
+            if [ -n "$ERROR_MESSAGE" ]; then
+              echo "Reported error: $ERROR_MESSAGE"
+            fi
+
+            echo "Check the Render application logs and scraper status response."
+            exit 1
           done
 
-          echo "Warning: Polling timed out after 45 minutes."
+          echo "ERROR: Monitoring timed out."
+          echo "Maximum monitoring window reached."
+          echo "The scraper may still be running on Render."
+          echo "Check Render logs and the scraper status endpoint."
+          exit 1
+
+      # ==========================================
+      # STEP 5: FINAL SUMMARY
+      # ==========================================
+      - name: Final Summary
+        if: success()
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "BMSIT SCRAPE WORKFLOW COMPLETED"
+          echo "Render health check: PASSED"
+          echo "Scraper trigger: ACCEPTED"
+          echo "Scraper completion: CONFIRMED"
+          echo "=========================================="
+
+      # ==========================================
+      # STEP 6: FAILURE SUMMARY
+      # ==========================================
+      - name: Failure Summary
+        if: failure()
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "BMSIT SCRAPE WORKFLOW FAILED"
+          echo "Check the earliest failed step above."
+          echo "Possible causes:"
+          echo "- Render service unavailable"
+          echo "- Missing or invalid admin credential"
+          echo "- Scraper endpoint returned an error"
+          echo "- Invalid status response"
+          echo "- Scraper failed or monitoring timed out"
+          echo "=========================================="
