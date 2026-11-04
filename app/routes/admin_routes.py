@@ -813,6 +813,14 @@ def upload_documents():
             file.filename
         )
 
+        if not filename:
+            results.append({
+                "filename": file.filename,
+                "status": "error",
+                "message": "Invalid filename."
+            })
+            continue
+
         dest_path = (
             Config.UPLOADS_DIR
             / filename

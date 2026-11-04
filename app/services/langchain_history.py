@@ -119,44 +119,44 @@ class LangChainHistoryManager:
         """
         Synchronizes client-supplied history with backend LangChain memory.
         Trims history to the maximum allowed window size.
+        Fully synchronized under _session_lock to prevent concurrent race conditions.
         """
-        history_obj = None
-        if session_id:
-            history_obj = self.get_session_history(str(session_id).strip())
+        with self._session_lock:
+            history_obj = None
+            if session_id:
+                history_obj = self.get_session_history(str(session_id).strip())
 
-        messages: List[BaseMessage] = []
+            messages: List[BaseMessage] = []
 
-        if client_history and isinstance(client_history, list):
-            # Reconstruct LangChain message objects from client payload
-            for turn in client_history:
-                if not isinstance(turn, dict):
-                    continue
-                role = str(turn.get("role", "")).lower()
-                text = str(turn.get("text") or turn.get("content") or "").strip()
-                if not text:
-                    continue
-                if role in ("user", "human"):
-                    messages.append(HumanMessage(content=text))
-                elif role in ("assistant", "ai", "bot"):
-                    messages.append(AIMessage(content=text))
-                elif role == "system":
-                    messages.append(SystemMessage(content=text))
-        elif history_obj:
-            messages = list(history_obj.messages)
+            if client_history and isinstance(client_history, list):
+                # Reconstruct LangChain message objects from client payload
+                for turn in client_history:
+                    if not isinstance(turn, dict):
+                        continue
+                    role = str(turn.get("role", "")).lower()
+                    text = str(turn.get("text") or turn.get("content") or "").strip()
+                    if not text:
+                        continue
+                    if role in ("user", "human"):
+                        messages.append(HumanMessage(content=text))
+                    elif role in ("assistant", "ai", "bot"):
+                        messages.append(AIMessage(content=text))
+                    elif role == "system":
+                        messages.append(SystemMessage(content=text))
+            elif history_obj:
+                messages = list(history_obj.messages)
 
+            # Windowing: Keep only the most recent turns
+            max_messages = MAX_HISTORY_TURNS * 2
+            if len(messages) > max_messages:
+                messages = messages[-max_messages:]
 
-        # Windowing: Keep only the most recent turns
-        max_messages = MAX_HISTORY_TURNS * 2
-        if len(messages) > max_messages:
-            messages = messages[-max_messages:]
-
-        if history_obj:
-            with self._session_lock:
+            if history_obj:
                 history_obj.clear()
                 for msg in messages:
                     history_obj.add_message(msg)
 
-        return messages
+            return messages
 
     def append_turn(
         self,

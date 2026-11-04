@@ -395,8 +395,9 @@ class RAGService:
         source_id = new_chunks[0].get("source_id")
         new_chunks, _ = self.dedupe_chunks(source_id, new_chunks)
         
-        # Filter out chunks that already exist in memory (prevent duplicates)
-        existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
+        # Filter out chunks that already exist in memory (prevent duplicates) under thread lock
+        with self._lock:
+            existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
         new_chunks = [c for c in new_chunks if c.get("chunk_id") not in existing_ids]
 
         if not new_chunks:
@@ -424,9 +425,10 @@ class RAGService:
         """
         supabase = SupabaseService.get_instance()
         
-        # Prevent duplicates: skip chunks whose chunk_id or exact text already exists
-        existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
-        existing_digests = {self._dedupe_key(c) for c in self._chunks}
+        # Prevent duplicates: skip chunks whose chunk_id or exact text already exists under thread lock
+        with self._lock:
+            existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
+            existing_digests = {self._dedupe_key(c) for c in self._chunks}
 
         filtered_chunks = []
         if new_chunks:

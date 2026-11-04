@@ -29,6 +29,10 @@ def count_tokens(text):
     """
     if not text:
         return 0
+    if isinstance(text, dict):
+        text = text.get("text", "")
+    if not isinstance(text, str):
+        text = str(text or "")
     stripped = text.strip()
     if not stripped:
         return 0

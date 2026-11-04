@@ -11,6 +11,7 @@ import hashlib
 import logging
 import os
 import re
+import threading
 import time
 
 try:
@@ -211,6 +212,7 @@ class FAISSIntentClassifier:
 
 class GeminiService:
     _session: Optional[requests.Session] = None
+    _session_lock = threading.Lock()
     _active_model: Optional[str] = None
     _model_cooldowns: Dict[str, float] = {}
 
@@ -241,15 +243,17 @@ class GeminiService:
     @classmethod
     def _get_session(cls) -> requests.Session:
         if cls._session is None:
-            s = requests.Session()
-            adapter = requests.adapters.HTTPAdapter(
-                pool_connections=10,
-                pool_maxsize=20,
-                max_retries=1
-            )
-            s.mount("https://", adapter)
-            s.mount("http://", adapter)
-            cls._session = s
+            with cls._session_lock:
+                if cls._session is None:
+                    s = requests.Session()
+                    adapter = requests.adapters.HTTPAdapter(
+                        pool_connections=20,
+                        pool_maxsize=50,
+                        max_retries=1
+                    )
+                    s.mount("https://", adapter)
+                    s.mount("http://", adapter)
+                    cls._session = s
         return cls._session
 
     # Known prompt injection patterns
@@ -447,6 +451,7 @@ class GeminiService:
                     "• **Phone**: +91-80-68730444 / +91-80-68730424\n"
                     "• **Website**: [https://bmsit.ac.in](https://bmsit.ac.in)"
                 )
+                history_mgr.append_turn(session_id, user_message, empty_reply)
                 return {
                     "reply": empty_reply,
                     "sources": [],

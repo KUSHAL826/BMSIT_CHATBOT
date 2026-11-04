@@ -24,10 +24,25 @@ def now_ist_str():
         return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
+import time
+
+
+def _replace_with_retry(src, dst, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == max_retries - 1:
+                raise
+            time.sleep(0.01 * (attempt + 1))
+
+
 def atomic_write_json(path, payload, indent=2):
     """
     Writes JSON to `path` atomically: serialise to a temp file in the same
     directory, flush to disk, then os.replace() over the target.
+    Includes retry loop for Windows file-locking under concurrency.
     Either the old file or the complete new file exists - never a partial one.
     """
     path = Path(path)
@@ -39,7 +54,7 @@ def atomic_write_json(path, payload, indent=2):
             json.dump(payload, f, indent=indent, ensure_ascii=False)
             f.flush()
             os.fsync(f.fileno())
-        os.replace(tmp_name, str(path))
+        _replace_with_retry(tmp_name, str(path))
     except Exception:
         try:
             if os.path.exists(tmp_name):
@@ -50,16 +65,25 @@ def atomic_write_json(path, payload, indent=2):
 
 
 def read_json(path, default=None):
-    """Reads JSON, returning `default` if the file is missing or unreadable."""
+    """
+    Reads JSON, returning `default` if the file is missing or unreadable.
+    Retries gracefully on transient PermissionError during concurrent atomic replacements.
+    """
     path = Path(path)
     if not path.exists():
         return default
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"[fsutil] Could not read {path.name}: {e}")
-        return default
+    for attempt in range(5):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (PermissionError, json.JSONDecodeError):
+            if attempt == 4:
+                return default
+            time.sleep(0.01 * (attempt + 1))
+        except Exception as e:
+            print(f"[fsutil] Could not read {path.name}: {e}")
+            return default
+    return default
 
 
 def atomic_write_bytes(path, write_fn):
@@ -74,7 +98,7 @@ def atomic_write_bytes(path, write_fn):
     os.close(fd)
     try:
         write_fn(tmp_name)
-        os.replace(tmp_name, str(path))
+        _replace_with_retry(tmp_name, str(path))
     except Exception:
         try:
             if os.path.exists(tmp_name):
