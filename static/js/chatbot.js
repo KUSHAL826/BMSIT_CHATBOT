@@ -13,6 +13,7 @@
   var welcome = document.getElementById("welcome");
   var form = document.getElementById("composer");
   var input = document.getElementById("composer-input");
+  var voiceButton = document.getElementById("voice-button");
   var sendButton = document.getElementById("send-button");
   var clearButton = document.getElementById("clear-chat");
   var statusPill = document.getElementById("kb-status");
@@ -239,6 +240,7 @@
     busy = value;
     sendButton.disabled = value;
     input.disabled = value;
+    if (voiceButton) { voiceButton.disabled = value; }
     if (!value) { input.focus(); }
   }
 
@@ -351,6 +353,80 @@
       welcome = fresh;
       input.focus();
     });
+  }
+
+  /* ---------------- voice recognition (Speech-to-Text) ---------------- */
+
+  var SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recognition = null;
+  var isListening = false;
+
+  if (SpeechRecognition && voiceButton) {
+    try {
+      recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = "en-IN";
+
+      recognition.onstart = function () {
+        isListening = true;
+        voiceButton.classList.add("listening");
+        voiceButton.setAttribute("aria-label", "Listening... Speak now");
+        voiceButton.title = "Listening... Speak now (Click to stop)";
+        input.placeholder = "Listening... speak now";
+      };
+
+      recognition.onresult = function (event) {
+        var transcript = "";
+        for (var i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          input.value = transcript;
+          autoGrow();
+        }
+      };
+
+      recognition.onerror = function (event) {
+        console.warn("Speech recognition error:", event.error);
+        stopListening();
+      };
+
+      recognition.onend = function () {
+        stopListening();
+      };
+
+      function stopListening() {
+        isListening = false;
+        voiceButton.classList.remove("listening");
+        voiceButton.setAttribute("aria-label", "Ask with voice");
+        voiceButton.title = "Voice Input (Click to speak)";
+        input.placeholder = "Ask about admissions, fees, placements, hostels...";
+        input.focus();
+        autoGrow();
+      }
+
+      voiceButton.addEventListener("click", function (event) {
+        event.preventDefault();
+        if (busy) { return; }
+        if (isListening) {
+          try { recognition.stop(); } catch (err) {}
+          stopListening();
+        } else {
+          try {
+            recognition.start();
+          } catch (err) {
+            console.warn("Speech recognition start failed:", err);
+            stopListening();
+          }
+        }
+      });
+    } catch (err) {
+      console.warn("Could not initialize SpeechRecognition:", err);
+      if (voiceButton) { voiceButton.style.display = "none"; }
+    }
+  } else if (voiceButton) {
+    voiceButton.style.display = "none";
   }
 
   loadStatus();
