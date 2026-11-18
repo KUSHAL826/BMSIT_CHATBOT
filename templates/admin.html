@@ -124,29 +124,74 @@
           </div>
         </div>
 
-        <!-- Detected Website Changes Box -->
+        <!-- Recent Website Crawl Runs (Top 5 Crawls) -->
         <div class="changes-box">
           <div class="changes-header">
-            <span>Detected Website Changes (Latest Crawl)</span>
-            <span style="color: #94a3b8; font-size: 11px;">Last Run: {{ scrape_state.last_scrape or 'Never' }}</span>
+            <span style="display: flex; align-items: center; gap: 7px;">
+              <span>🌐</span>
+              <span>Recent Website Crawls (Top 5 Runs)</span>
+            </span>
+            <span style="color: #94a3b8; font-size: 11px;">
+              {% if top_crawls and top_crawls|length > 0 %}
+                Latest: {{ top_crawls[0].timestamp }}
+              {% else %}
+                Last Run: {{ scrape_state.last_scrape or 'Never' }}
+              {% endif %}
+            </span>
           </div>
-          <div class="changes-list" id="changes-list-container">
-            {% if scrape_state.changes %}
-              {% for c in scrape_state.changes %}
-                <div class="change-item">
-                  {% if c.change_type == 'NEW' %}
-                    <span class="tag-new">NEW</span>
-                  {% elif c.change_type == 'MODIFIED' %}
-                    <span class="tag-mod">MODIFIED</span>
-                  {% else %}
-                    <span class="tag-del">DELETED</span>
+
+          <div class="crawl-history-list" id="crawl-history-container">
+            {% if top_crawls and top_crawls|length > 0 %}
+              {% for crawl in top_crawls %}
+                <div class="crawl-run-item">
+                  <div class="crawl-run-header">
+                    <div class="crawl-run-meta">
+                      <span class="crawl-run-index">#{{ loop.index }}</span>
+                      <span class="crawl-badge {% if crawl.status == 'success' %}badge-success{% elif crawl.status == 'no_change' %}badge-info{% elif crawl.status == 'partial' %}badge-warning{% else %}badge-danger{% endif %}">
+                        {{ crawl.status_label or (crawl.status|upper) }}
+                      </span>
+                      <span class="crawl-trigger-tag">{{ crawl.trigger or 'Manual' }}</span>
+                    </div>
+                    <span class="crawl-run-time">{{ crawl.timestamp }}</span>
+                  </div>
+
+                  <div class="crawl-run-summary">
+                    <span><strong>{{ crawl.pages_crawled|default(0) }}</strong> pages crawled</span>
+                    <span class="crawl-sep">&bull;</span>
+                    <span><strong>{{ crawl.chunks_active|default(0) }}</strong> active chunks</span>
+                    {% if crawl.changes_count is defined and crawl.changes_count > 0 %}
+                      <span class="crawl-sep">&bull;</span>
+                      <span class="crawl-changes-alert">{{ crawl.changes_count }} change(s) detected</span>
+                    {% endif %}
+                  </div>
+
+                  {% if crawl.changes and crawl.changes|length > 0 %}
+                    <div class="crawl-run-changes">
+                      {% for c in crawl.changes %}
+                        <div class="change-item">
+                          {% if c.change_type == 'NEW' %}
+                            <span class="tag-new">NEW</span>
+                          {% elif c.change_type == 'MODIFIED' %}
+                            <span class="tag-mod">MODIFIED</span>
+                          {% else %}
+                            <span class="tag-del">DELETED</span>
+                          {% endif %}
+                          <span style="font-weight: 500;">{{ c.title }}</span>
+                          {% if c.summary %}
+                            <span style="color: #64748b;">- {{ c.summary }}</span>
+                          {% endif %}
+                        </div>
+                      {% endfor %}
+                    </div>
+                  {% elif crawl.summary %}
+                    <div class="crawl-run-note">{{ crawl.summary }}</div>
                   {% endif %}
-                  <span style="font-weight: 500;">{{ c.title }}</span>
-                  <span style="color: #64748b;">- {{ c.summary }}</span>
                 </div>
               {% endfor %}
             {% else %}
-              <div style="color: #64748b; font-style: italic; padding: 4px;">{{ scrape_state.summary or 'No changes detected. Website is up to date.' }}</div>
+              <div class="crawl-empty-state">
+                <span>No crawl history recorded yet. Click <strong>⚡ Scrape Now</strong> above to start crawling.</span>
+              </div>
             {% endif %}
           </div>
         </div>

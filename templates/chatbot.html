@@ -11,30 +11,22 @@
   <a class="skip-link" href="#composer-input">Skip to the question box</a>
 
   <div class="shell">
-    <!-- Official BMSIT Institutional Header -->
-    <div class="college-header">
-      <a href="https://bmsit.ac.in" target="_blank" rel="noopener noreferrer" class="college-header-logo-link" title="Visit BMSIT Official Website">
-        <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMS Institute of Technology & Management" class="college-header-logo" onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/bmsit-header.png') }}';">
+    <!-- Official BMSIT Institutional Header (Single White Header) -->
+    <header class="college-header">
+      <a href="https://bmsit.ac.in" target="_blank" rel="noopener noreferrer" class="college-header-logo-link" title="B.M.S. Institute of Technology & Management">
+        <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMS Institute of Technology & Management" class="college-header-logo" onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/bmsit-official.png') }}';">
       </a>
-      <div class="college-header-badge">
-        <span class="badge-dot"></span>
-        <span>Official AI Campus Portal</span>
-      </div>
-    </div>
-
-    <header class="topbar">
-      <div class="brand">
-        <div class="brand-text">
-          <h1>Ask BMSIT</h1>
-          <p>Autonomous Institution under VTU &middot; Bengaluru</p>
-        </div>
-      </div>
-      <div class="topbar-actions">
-        <span class="status-pill" id="kb-status" role="status">
+      <div class="header-actions">
+        <span class="status-pill" id="kb-status" role="status" title="Knowledge Base Connected">
           <span class="status-dot" aria-hidden="true"></span>
           <span class="status-label">Connecting</span>
         </span>
-        <button type="button" class="ghost-button" id="clear-chat">New chat</button>
+        <button type="button" class="new-chat-button ghost-button" id="clear-chat" title="Start a fresh conversation">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 5v14M5 12h14"/>
+          </svg>
+          <span>New chat</span>
+        </button>
       </div>
     </header>
 

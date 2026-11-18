@@ -207,12 +207,12 @@ class WebsiteScraper:
                 }
 
             changes_summary_text = self._format_changes_summary(detected_changes)
-            StorageService.save_scrape_state({
-                "pages": merged_pages,
-                "changes": detected_changes,
-                "last_scrape": StorageService._now_ist_str(),
-                "summary": changes_summary_text
-            })
+            state = StorageService.load_scrape_state()
+            state["pages"] = merged_pages
+            state["changes"] = detected_changes
+            state["last_scrape"] = StorageService._now_ist_str()
+            state["summary"] = changes_summary_text
+            StorageService.save_scrape_state(state)
 
             # Snapshot of raw crawled HTML text, merged with previous snapshots.
             scrape_batch_file = Config.SCRAPED_DIR / "bmsit_web_content.json"

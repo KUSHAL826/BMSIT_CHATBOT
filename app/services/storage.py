@@ -199,10 +199,11 @@ class StorageService:
         with cls._lock:
             state = read_json(Config.SCRAPE_STATE_FILE, default=None)
             if not isinstance(state, dict):
-                return {"pages": {}, "changes": [], "last_scrape": None}
+                return {"pages": {}, "changes": [], "last_scrape": None, "runs": []}
             state.setdefault("pages", {})
             state.setdefault("changes", [])
             state.setdefault("last_scrape", None)
+            state.setdefault("runs", [])
             return state
 
     @classmethod
@@ -213,9 +214,67 @@ class StorageService:
             atomic_write_json(Config.SCRAPE_STATE_FILE, state)
 
     @classmethod
+    def record_crawl_run(cls, run_info):
+        """
+        Records a crawl run in scrape_state.json history.
+        Keeps the latest 10 runs persistently.
+        """
+        Config.ensure_directories()
+        with cls._lock:
+            state = cls.load_scrape_state()
+            runs = state.get("runs", [])
+            if not isinstance(runs, list):
+                runs = []
+            
+            # Prepend newest crawl run
+            runs.insert(0, run_info)
+            # Cap at 10 runs
+            state["runs"] = runs[:10]
+            
+            # Sync top-level status shortcuts
+            if "timestamp" in run_info:
+                state["last_scrape"] = run_info["timestamp"]
+            if "changes" in run_info:
+                state["changes"] = run_info["changes"]
+            if "summary" in run_info:
+                state["summary"] = run_info["summary"]
+            
+            cls.save_scrape_state(state)
+            return run_info
+
+    @classmethod
+    def get_top_crawls(cls, limit=5):
+        """
+        Returns the top `limit` crawl history runs (latest first).
+        If history is empty but legacy last_scrape exists, synthesizes a run.
+        """
+        state = cls.load_scrape_state()
+        runs = state.get("runs", [])
+        if isinstance(runs, list) and len(runs) > 0:
+            return runs[:limit]
+        
+        # Fallback if runs is empty but previous crawl data exists
+        if state.get("last_scrape"):
+            changes = state.get("changes", [])
+            pages = state.get("pages", {})
+            return [{
+                "id": "crawl-legacy",
+                "timestamp": state["last_scrape"],
+                "trigger": "Previous Run",
+                "status": "success",
+                "status_label": "Indexed",
+                "pages_crawled": len(pages),
+                "chunks_active": 0,
+                "summary": state.get("summary") or "Previous website crawl record.",
+                "changes_count": len(changes),
+                "changes": changes[:10] if isinstance(changes, list) else [],
+            }]
+        return []
+
+    @classmethod
     def reset_scrape_state(cls):
         """Clears crawl hashes so the next scrape re-fetches and re-indexes everything."""
-        cls.save_scrape_state({"pages": {}, "changes": [], "last_scrape": None,
+        cls.save_scrape_state({"pages": {}, "changes": [], "last_scrape": None, "runs": [],
                                "summary": "Crawl state reset after website knowledge was deleted."})
 
     @classmethod

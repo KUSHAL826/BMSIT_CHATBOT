@@ -835,6 +835,10 @@ def admin_dashboard():
         StorageService.load_scrape_state()
     )
 
+    top_crawls = (
+        StorageService.get_top_crawls(limit=5)
+    )
+
     rag_stats = (
         RAGService
         .get_instance()
@@ -857,6 +861,7 @@ def admin_dashboard():
         settings=settings,
 
         scrape_state=scrape_state,
+        top_crawls=top_crawls,
 
         rag_stats=rag_stats,
 
@@ -914,6 +919,9 @@ def get_system_status():
             scrape_state.get(
                 "last_scrape"
             ),
+
+        "top_crawls":
+            StorageService.get_top_crawls(limit=5),
 
         "changes_count":
             len(

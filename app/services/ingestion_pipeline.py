@@ -19,6 +19,7 @@ swap always happens after successful embedding, so a failed run cannot empty the
 knowledge base.
 """
 import logging
+import time
 
 from app.config import Config
 from app.services.chunker import count_tokens
@@ -336,6 +337,24 @@ def run_website_delta_ingestion(is_scheduled=False):
             },
         )
 
+        # Record persistent crawl history run (Top 5 crawls in Admin Panel)
+        StorageService.record_crawl_run({
+            "id": f"crawl-{int(time.time())}",
+            "timestamp": StorageService._now_ist_str(),
+            "trigger": trigger.capitalize() if trigger else "Manual",
+            "status": "partial" if partial else "success",
+            "status_label": "Partially Indexed" if partial else "Completed",
+            "pages_crawled": len(pages),
+            "pages_changed": len(changed),
+            "pages_skipped": len(unchanged),
+            "chunks_active": total_chunks,
+            "new_chunks": added,
+            "replaced_chunks": replaced,
+            "summary": summary,
+            "changes_count": len(crawl.get("changes", [])),
+            "changes": crawl.get("changes", [])[:10],
+        })
+
         scraper_status.phase = "completed"
         scraper_status.status_message = summary
         logger.info("[Delta] %s", summary)
@@ -387,6 +406,22 @@ def _crawl_failed(rag, source_id, message):
         chunk_count=existing,
         changes=f"Crawl failed: {message}. Previously stored knowledge is intact.",
     )
+    StorageService.record_crawl_run({
+        "id": f"crawl-{int(time.time())}",
+        "timestamp": StorageService._now_ist_str(),
+        "trigger": "Manual",
+        "status": "error",
+        "status_label": "Failed",
+        "pages_crawled": 0,
+        "pages_changed": 0,
+        "pages_skipped": 0,
+        "chunks_active": existing,
+        "new_chunks": 0,
+        "replaced_chunks": 0,
+        "summary": f"Crawl failed: {message}",
+        "changes_count": 0,
+        "changes": [],
+    })
     scraper_status.phase = "error"
     scraper_status.error = message
     scraper_status.status_message = f"Failed: {message}"
@@ -420,6 +455,22 @@ def _nothing_to_do(rag, source_id, crawled, unchanged, crawl, trigger):
             "changes": crawl.get("changes", []),
         },
     )
+    StorageService.record_crawl_run({
+        "id": f"crawl-{int(time.time())}",
+        "timestamp": StorageService._now_ist_str(),
+        "trigger": trigger.capitalize() if trigger else "Manual",
+        "status": "no_change",
+        "status_label": "Up to Date",
+        "pages_crawled": crawled,
+        "pages_changed": 0,
+        "pages_skipped": unchanged,
+        "chunks_active": total,
+        "new_chunks": 0,
+        "replaced_chunks": 0,
+        "summary": summary,
+        "changes_count": 0,
+        "changes": [],
+    })
     scraper_status.phase = "completed"
     scraper_status.status_message = summary
     logger.info("[Delta] %s", summary)

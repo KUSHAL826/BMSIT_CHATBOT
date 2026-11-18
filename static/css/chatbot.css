@@ -87,15 +87,16 @@ body {
   }
 }
 
-/* ---------- official college header ---------- */
+/* ---------- official college header (single white bar) ---------- */
 .college-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 10px 20px;
+  padding: 12px 24px;
   background: #ffffff;
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
 }
 
 .college-header-logo-link {
@@ -105,126 +106,115 @@ body {
 }
 
 .college-header-logo {
-  height: 52px;
+  height: 56px;
   width: auto;
-  max-width: 100%;
+  max-width: 360px;
   object-fit: contain;
   display: block;
 }
 
-.college-header-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  background: rgba(18, 58, 109, 0.06);
-  border: 1px solid rgba(18, 58, 109, 0.12);
-  color: var(--brand);
-  padding: 5px 12px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  font-weight: 600;
-  letter-spacing: 0.3px;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-.college-header-badge .badge-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: #10b981;
-}
-
-@media (max-width: 580px) {
-  .college-header {
-    padding: 8px 14px;
-  }
-  .college-header-logo {
-    height: 40px;
-  }
-  .college-header-badge {
-    display: none;
-  }
-}
-
-/* ---------- top bar ---------- */
-.topbar {
+.header-actions {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 14px 20px;
-  background: var(--brand);
-  color: #fff;
+  gap: 12px;
+  flex-shrink: 0;
 }
-
-.brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
-
-.brand-mark {
-  width: 40px; height: 40px;
-  flex: 0 0 40px;
-  border-radius: 11px;
-  background: #fff;
-  color: var(--brand);
-  display: grid;
-  place-items: center;
-  font-weight: 800;
-  font-size: 20px;
-}
-
-.brand-text { min-width: 0; }
-.brand-text h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: .2px; }
-.brand-text p {
-  margin: 1px 0 0;
-  font-size: 12.5px;
-  color: rgba(255, 255, 255, .78);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.topbar-actions { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  padding: 5px 11px;
+  padding: 6px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, .14);
-  font-size: 12px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  color: #1e293b;
+  font-size: 12.5px;
   font-weight: 600;
+  letter-spacing: 0.2px;
   white-space: nowrap;
+  transition: all 0.2s ease;
 }
 
 .status-dot {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: #f0c000;
+  background: #f59e0b; /* amber for connecting */
+  flex-shrink: 0;
 }
-.status-pill.is-ready .status-dot { background: #4ade80; }
-.status-pill.is-empty .status-dot { background: #fb923c; }
-.status-pill.is-down .status-dot { background: #f87171; }
 
+.status-pill.is-ready .status-dot {
+  background: #10b981; /* bright green for ready */
+  box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2);
+}
+
+.status-pill.is-empty .status-dot {
+  background: #f97316;
+  box-shadow: 0 0 0 2px rgba(249, 115, 22, 0.2);
+}
+
+.status-pill.is-down .status-dot {
+  background: #ef4444;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.2);
+}
+
+.new-chat-button,
 .ghost-button {
-  border: 1px solid rgba(255, 255, 255, .35);
-  background: transparent;
-  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #cbd5e1;
+  background: #ffffff;
+  color: #0f2d59;
   font: inherit;
   font-size: 13px;
   font-weight: 600;
-  padding: 6px 13px;
+  padding: 7px 15px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background .15s ease, border-color .15s ease;
+  transition: all 0.15s ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
-.ghost-button:hover { background: rgba(255, 255, 255, .16); }
-.ghost-button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
 
-@media (max-width: 560px) {
-  .brand-text p { display: none; }
-  .status-pill .status-label { display: none; }
-  .status-pill { padding: 7px; }
+.new-chat-button:hover,
+.ghost-button:hover {
+  background: #f8fafc;
+  border-color: #0f2d59;
+  color: #0f2d59;
+}
+
+.new-chat-button:focus-visible,
+.ghost-button:focus-visible {
+  outline: 2px solid #0f2d59;
+  outline-offset: 2px;
+}
+
+.new-chat-button:active,
+.ghost-button:active {
+  transform: translateY(1px);
+}
+
+@media (max-width: 580px) {
+  .college-header {
+    padding: 10px 14px;
+    gap: 8px;
+  }
+  .college-header-logo {
+    height: 42px;
+    max-width: 200px;
+  }
+  .status-pill .status-label {
+    display: none;
+  }
+  .status-pill {
+    padding: 7px;
+  }
+  .new-chat-button,
+  .ghost-button {
+    padding: 6px 10px;
+    font-size: 12px;
+  }
 }
 
 /* ---------- conversation ---------- */
