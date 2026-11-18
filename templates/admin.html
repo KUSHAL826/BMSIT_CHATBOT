@@ -12,7 +12,9 @@
     <!-- Top Header Navigation -->
     <header class="header">
       <div class="brand-section">
-        <div class="brand-logo-badge">🎓</div>
+        <a href="https://bmsit.ac.in" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; text-decoration: none;" title="Visit BMSIT Official Website">
+          <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMSIT Logo" style="height: 48px; background: #ffffff; padding: 3px 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); object-fit: contain;" onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/bmsit-header.png') }}';">
+        </a>
         <div class="brand-title">
           <h1>BMSIT AI Agent Admin & Training</h1>
           <p>B.M.S. Institute of Technology and Management | Autonomous RAG Knowledge Base</p>
