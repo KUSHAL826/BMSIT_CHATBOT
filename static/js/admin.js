@@ -310,7 +310,7 @@ function initDeleteHandlers() {
       btn.textContent = "Deleting...";
 
       try {
-        const res = await fetch(`/api/admin/source/${sourceId}`, {
+        const res = await fetch(`/api/admin/source/${encodeURIComponent(sourceId)}`, {
           method: "DELETE"
         });
         const data = await res.json();
@@ -416,24 +416,67 @@ function initDocumentViewerModal() {
       const filename = btn.getAttribute("data-file") || "Knowledge Source";
       const sourceId = btn.getAttribute("data-id");
       const sourceType = btn.getAttribute("data-type") || (filename.includes(".") ? "document" : "website");
+      const pageUrl = btn.getAttribute("data-url") || "";
 
       modalTitle.textContent = filename;
       modal.style.display = "flex";
 
-      if (sourceType === "website" && sourceId) {
-        // Scraped Website Preview
+      if ((sourceType === "website" || sourceType === "website_page") && sourceId) {
+        // Scraped Website / Webpage Preview
         iframe.style.display = "none";
         iframe.src = "about:blank";
-        externalLink.href = "https://bmsit.ac.in";
-        externalLink.textContent = "🌐 Open BMSIT Website";
+        if (pageUrl) {
+          externalLink.href = pageUrl;
+          externalLink.textContent = "↗ Open Live Webpage";
+        } else {
+          externalLink.href = "https://bmsit.ac.in";
+          externalLink.textContent = "🌐 Open BMSIT Website";
+        }
+
         if (textContainer) {
           textContainer.style.display = "block";
-          textContainer.innerHTML = `<div style="text-align:center; padding: 40px; color: #94a3b8;"><span style="font-size:24px;">⏳</span><br><br>Loading scraped website knowledge preview...</div>`;
+          textContainer.innerHTML = `<div style="text-align:center; padding: 40px; color: #94a3b8;"><span style="font-size:24px;">⏳</span><br><br>Loading scraped webpage knowledge preview...</div>`;
 
           try {
-            const res = await fetch(`/api/admin/source-preview/${sourceId}`);
+            const res = await fetch(`/api/admin/source-preview/${encodeURIComponent(sourceId)}`);
             const data = await res.json();
             if (res.ok && data.status === "success") {
+              if (data.source_type === "website_page") {
+                let html = `<div style="max-width: 860px; margin: 0 auto;">`;
+                html += `<div style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1);">
+                  <h2 style="font-size: 20px; font-weight: 700; color: #fff;">🌐 ${data.title}</h2>
+                  <div style="font-size: 13px; color: #94a3b8; margin-top: 6px; display: flex; gap: 16px; flex-wrap: wrap;">
+                    <span>URL: <a href="${data.url}" target="_blank" style="color: #60a5fa; text-decoration: none;">${data.url} ↗</a></span>
+                    <span>Indexed Date: <strong style="color:#e2e8f0;">${data.date}</strong></span>
+                    <span>Vector Chunks: <strong style="color:#38bdf8;">${data.total_chunks}</strong></span>
+                  </div>
+                </div>`;
+
+                if (data.text) {
+                  html += `<div style="margin-bottom: 24px;">
+                    <h3 style="font-size: 15px; font-weight: 600; color: #38bdf8; margin-bottom: 10px;">📄 Extracted Webpage Text</h3>
+                    <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 8px; padding: 16px 20px; font-size: 13px; color: #cbd5e1; line-height: 1.6; max-height: 320px; overflow-y: auto; white-space: pre-wrap;">${data.text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+                  </div>`;
+                }
+
+                if (data.sample_chunks && data.sample_chunks.length > 0) {
+                  html += `<div>
+                    <h3 style="font-size: 15px; font-weight: 600; color: #a855f7; margin-bottom: 12px;">🧩 Indexed Vector Chunks (${data.sample_chunks.length})</h3>
+                    <div style="display: flex; flex-direction: column; gap: 12px;">`;
+                  data.sample_chunks.forEach((c) => {
+                    html += `<div style="background: rgba(255,255,255,0.02); border: 1px solid rgba(255,255,255,0.07); border-radius: 8px; padding: 12px 16px;">
+                      <div style="font-size: 11px; color: #64748b; margin-bottom: 6px; font-family: monospace;">Chunk ID: ${c.id || 'N/A'}</div>
+                      <div style="font-size: 13px; color: #cbd5e1; line-height: 1.5;">${(c.text || '').replace(/</g, "&lt;").replace(/>/g, "&gt;")}</div>
+                    </div>`;
+                  });
+                  html += `</div></div>`;
+                }
+
+                html += `</div>`;
+                textContainer.innerHTML = html;
+                return;
+              }
+
               let html = `<div style="max-width: 860px; margin: 0 auto;">`;
               html += `<div style="margin-bottom: 24px; padding-bottom: 16px; border-bottom: 1px solid rgba(255,255,255,0.1);">
                 <h2 style="font-size: 20px; font-weight: 700; color: #fff;">🌐 ${data.title}</h2>

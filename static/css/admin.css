@@ -517,6 +517,7 @@ body {
 
 .status-indexed { background: rgba(16, 185, 129, 0.15); color: #10b981; }
 .status-processing { background: rgba(245, 158, 11, 0.15); color: #f59e0b; }
+.status-partially-indexed { background: rgba(56, 189, 248, 0.15); color: #38bdf8; }
 .status-failed { background: rgba(239, 68, 68, 0.15); color: #ef4444; }
 
 .btn-delete {

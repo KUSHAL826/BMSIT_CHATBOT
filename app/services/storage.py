@@ -218,6 +218,18 @@ class StorageService:
         cls.save_scrape_state({"pages": {}, "changes": [], "last_scrape": None,
                                "summary": "Crawl state reset after website knowledge was deleted."})
 
+    @classmethod
+    def remove_scrape_page(cls, page_url):
+        """Removes a single scraped page URL from scrape state."""
+        Config.ensure_directories()
+        with cls._lock:
+            state = cls.load_scrape_state()
+            if isinstance(state, dict) and "pages" in state and page_url in state["pages"]:
+                del state["pages"][page_url]
+                cls.save_scrape_state(state)
+                return True
+            return False
+
     # ------------------------------------------------------------------
     # Settings
     # ------------------------------------------------------------------

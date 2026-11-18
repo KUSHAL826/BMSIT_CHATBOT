@@ -1,9 +1,12 @@
+import hashlib
 import os
 import re
 import threading
 from pathlib import Path
 
 import requests
+
+from app.services.fsutil import now_ist_str
 
 from flask import (
     Blueprint,
@@ -427,39 +430,258 @@ def _build_supabase_history():
     return history
 
 
-def _get_persistent_history():
+def _clean_page_title(title, url):
+    """Generates a clean human-friendly title for a scraped page."""
+    if title and str(title).strip() and str(title).strip().lower() not in ("none", "null", "unknown"):
+        clean = str(title).strip()
+        for suffix in (" | BMSIT&M", " - BMSIT&M", " | BMSIT", " - BMSIT", " - Bengaluru"):
+            if clean.endswith(suffix):
+                clean = clean[:-len(suffix)].strip()
+        return clean or str(title).strip()
+
+    if url:
+        path = str(url).replace("https://", "").replace("http://", "").rstrip("/").split("/", 1)
+        if len(path) > 1 and path[1]:
+            last_segment = path[1].rsplit("/", 1)[-1].replace("-", " ").replace("_", " ").title()
+            return last_segment if last_segment else "BMSIT College Page"
+        return "BMSIT Home Page"
+    return "College Web Page"
+
+
+def _get_persistent_website_knowledge():
     """
-    Merges local training history with persistent Supabase sources,
-    ensuring all active trained documents and web scrapes stay visible.
+    Retrieves all scraped website pages and website training entries.
+    Extracts every individual crawled page with URL, title, chunk count,
+    and scrape timestamp, drawing from local KnowledgeStore, scrape state,
+    local chunks, and persistent Supabase vectors.
     """
+    pages_map = {}
+
+    # 1. Local KnowledgeStore (web-bmsit.json)
+    try:
+        record = KnowledgeStore.load_source(KnowledgeStore.WEBSITE_SOURCE_ID)
+        if record and isinstance(record.get("items"), dict):
+            for url, item in record["items"].items():
+                if not url:
+                    continue
+                pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+                text = item.get("text", "") or ""
+                title = _clean_page_title(item.get("title"), url)
+                date = item.get("updated") or record.get("updated") or now_ist_str()
+                pages_map[url] = {
+                    "id": pid,
+                    "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
+                    "item_key": url,
+                    "url": url,
+                    "title": title,
+                    "source": title,
+                    "source_type": "website",
+                    "file_type": "web",
+                    "status": "Indexed",
+                    "chunk_count": 0,
+                    "date": date,
+                    "chars": len(text),
+                    "changes": f"{len(text):,} chars" if text else "Indexed",
+                    "text": text,
+                }
+    except Exception as e:
+        print(f"[Admin] KnowledgeStore website read error: {e}")
+
+    # 2. Scrape State (data/scrape_state.json)
+    try:
+        scrape_state = StorageService.load_scrape_state()
+        state_pages = scrape_state.get("pages", {}) if isinstance(scrape_state, dict) else {}
+        for url, pinfo in state_pages.items():
+            if not url:
+                continue
+            pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+            title = _clean_page_title(pinfo.get("title"), url)
+            length = pinfo.get("length", 0)
+            date = pinfo.get("last_seen") or scrape_state.get("last_scrape") or now_ist_str()
+            if url not in pages_map:
+                pages_map[url] = {
+                    "id": pid,
+                    "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
+                    "item_key": url,
+                    "url": url,
+                    "title": title,
+                    "source": title,
+                    "source_type": "website",
+                    "file_type": "web",
+                    "status": "Indexed",
+                    "chunk_count": 0,
+                    "date": date,
+                    "chars": length,
+                    "changes": f"{length:,} chars" if length else "Indexed",
+                    "text": "",
+                }
+            else:
+                if not pages_map[url]["chars"] and length:
+                    pages_map[url]["chars"] = length
+                    pages_map[url]["changes"] = f"{length:,} chars"
+    except Exception as e:
+        print(f"[Admin] Scrape state read error: {e}")
+
+    # 3. Local RAG Chunks (FAISS)
+    try:
+        rag = RAGService.get_instance()
+        with rag._lock:
+            for chunk in rag._chunks:
+                st = str(chunk.get("source_type") or "").lower()
+                sid = str(chunk.get("source_id") or "")
+                if st in ("website", "web", "scrape") or sid == KnowledgeStore.WEBSITE_SOURCE_ID:
+                    url = chunk.get("item_key") or (chunk.get("metadata") or {}).get("url")
+                    if url and url in pages_map:
+                        pages_map[url]["chunk_count"] += 1
+                    elif url:
+                        pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+                        title = _clean_page_title((chunk.get("metadata") or {}).get("title"), url)
+                        pages_map[url] = {
+                            "id": pid,
+                            "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
+                            "item_key": url,
+                            "url": url,
+                            "title": title,
+                            "source": title,
+                            "source_type": "website",
+                            "file_type": "web",
+                            "status": "Indexed",
+                            "chunk_count": 1,
+                            "date": now_ist_str(),
+                            "chars": len(chunk.get("text", "")),
+                            "changes": "Indexed chunk",
+                            "text": chunk.get("text", ""),
+                        }
+    except Exception as e:
+        print(f"[Admin] RAG chunks read error: {e}")
+
+    # 4. Supabase Persistent Vectors (survives Render redeployments)
+    try:
+        supabase_vectors = _load_supabase_vectors_for_admin()
+        for row in supabase_vectors:
+            st = str(row.get("source_type") or "").lower()
+            sid = str(row.get("source_id") or "")
+            if st in ("website", "web", "scrape") or sid in (KnowledgeStore.WEBSITE_SOURCE_ID, "website"):
+                url = row.get("item_key") or (row.get("metadata") or {}).get("url")
+                if not url and str(row.get("source_name", "")).startswith("http"):
+                    url = str(row.get("source_name"))
+                if url:
+                    if url in pages_map:
+                        pages_map[url]["chunk_count"] += 1
+                    else:
+                        pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+                        title = _clean_page_title((row.get("metadata") or {}).get("title"), url)
+                        pages_map[url] = {
+                            "id": pid,
+                            "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
+                            "item_key": url,
+                            "url": url,
+                            "title": title,
+                            "source": title,
+                            "source_type": "website",
+                            "file_type": "web",
+                            "status": "Indexed",
+                            "chunk_count": 1,
+                            "date": "Persistent (Supabase)",
+                            "chars": len(row.get("text", "") or ""),
+                            "changes": "Stored in Supabase",
+                            "text": (row.get("text", "") or "")[:500],
+                        }
+    except Exception as e:
+        print(f"[Admin] Supabase website pages read error: {e}")
+
+    pages = list(pages_map.values())
+
+    # Fallback: If no individual URLs could be extracted, but website entry exists in history
+    if not pages:
+        try:
+            local_history = StorageService.load_history() or []
+            for h in local_history:
+                if h.get("source_type") == "website" or h.get("id") == KnowledgeStore.WEBSITE_SOURCE_ID:
+                    pages.append(h)
+        except Exception:
+            pass
+
+    # Ensure chunk counts are at least 1 if page is indexed
+    for p in pages:
+        if p.get("chunk_count", 0) == 0 and p.get("chars", 0) > 0:
+            p["chunk_count"] = max(1, p["chars"] // 500)
+
+    # Sort pages: highest chunk count first, then by title
+    pages.sort(key=lambda p: (p.get("chunk_count", 0), p.get("title", "")), reverse=True)
+    return pages
+
+
+def _get_persistent_document_knowledge():
+    """
+    Retrieves all uploaded institutional document entries (PDF, DOCX, DOC, CSV).
+    Extracts every document uploaded by administrators from local history,
+    KnowledgeStore sources, physical uploads directory, and Supabase vectors.
+    """
+    seen_ids = set()
+    documents = []
+
+    # 1. Local history entries
     try:
         local_history = StorageService.load_history() or []
+        for h in local_history:
+            if h.get("source_type") != "website" and h.get("id") != KnowledgeStore.WEBSITE_SOURCE_ID:
+                doc_id = str(h.get("id") or h.get("source") or "").strip().lower()
+                if doc_id and doc_id not in seen_ids:
+                    seen_ids.add(doc_id)
+                    documents.append(h)
     except Exception as e:
-        print(f"[Admin] Local history load error: {e}")
-        local_history = []
+        print(f"[Admin] Local history document read error: {e}")
 
+    # 2. Local KnowledgeStore documents
     try:
-        persistent_history = _build_supabase_history() or []
+        sources = KnowledgeStore.list_sources() or []
+        for rec in sources:
+            if rec.get("source_type") == "document":
+                sid = str(rec.get("source_id") or "").strip().lower()
+                sname = str(rec.get("source_name") or sid).strip().lower()
+                if sid and sid not in seen_ids and sname not in seen_ids:
+                    seen_ids.add(sid)
+                    seen_ids.add(sname)
+                    ext = sname.rsplit(".", 1)[-1].lower() if "." in sname else "document"
+                    items = rec.get("items", {})
+                    documents.append({
+                        "id": rec.get("source_id"),
+                        "source": rec.get("source_name") or sid,
+                        "source_type": "document",
+                        "file_type": ext,
+                        "status": "Indexed",
+                        "chunk_count": len(items),
+                        "changes": f"{len(items)} section(s) stored",
+                        "date": rec.get("updated") or rec.get("created") or now_ist_str(),
+                        "details": {"items_count": len(items)},
+                    })
     except Exception as e:
-        print(f"[Admin] Persistent Supabase history load error: {e}")
-        persistent_history = []
+        print(f"[Admin] KnowledgeStore document read error: {e}")
 
-    seen_keys = set()
-    combined = []
+    # 3. Persistent Supabase documents (for Render redeployments)
+    try:
+        supabase_history = _build_supabase_history() or []
+        for item in supabase_history:
+            if item.get("source_type") != "website" and item.get("id") != KnowledgeStore.WEBSITE_SOURCE_ID:
+                key = str(item.get("source") or item.get("id") or "").strip().lower()
+                if key and key not in seen_ids:
+                    seen_ids.add(key)
+                    seen_ids.add(str(item.get("id", "")).strip().lower())
+                    documents.append(item)
+    except Exception as e:
+        print(f"[Admin] Supabase document read error: {e}")
 
-    for item in local_history:
-        key = str(item.get("source") or item.get("id") or "").strip().lower()
-        if key and key not in seen_keys:
-            seen_keys.add(key)
-            combined.append(item)
+    # Sort documents by date / upload time descending
+    documents.sort(key=lambda d: str(d.get("date", "")), reverse=True)
+    return documents
 
-    for item in persistent_history:
-        key = str(item.get("source") or item.get("id") or "").strip().lower()
-        if key and key not in seen_keys:
-            seen_keys.add(key)
-            combined.append(item)
 
-    return combined
+def _get_persistent_history():
+    """
+    Merges documents and website knowledge into a combined list for backward compatibility.
+    """
+    return _get_persistent_document_knowledge() + _get_persistent_website_knowledge()
 
 
 # ============================================================
@@ -598,10 +820,12 @@ def index():
 @admin_bp.route("/admin")
 def admin_dashboard():
 
-    # Persistent history fallback.
-    history = (
-        _get_persistent_history()
-    )
+    website_pages = _get_persistent_website_knowledge()
+    document_sources = _get_persistent_document_knowledge()
+    history = document_sources + website_pages
+
+    website_chunks_count = sum(p.get("chunk_count", 0) for p in website_pages)
+    document_chunks_count = sum(d.get("chunk_count", 0) for d in document_sources)
 
     settings = (
         StorageService.load_settings()
@@ -625,6 +849,10 @@ def admin_dashboard():
         "admin.html",
 
         history=history,
+        website_pages=website_pages,
+        document_sources=document_sources,
+        website_chunks_count=website_chunks_count,
+        document_chunks_count=document_chunks_count,
 
         settings=settings,
 
@@ -942,23 +1170,21 @@ def get_scrape_status():
     methods=["GET"]
 )
 def get_training_history():
-
     """
-    Fetches full training history.
-
-    Local StorageService history is preferred.
-
-    Persistent Supabase vector metadata is
-    used as fallback after redeployment.
+    Fetches training history, returning both separated website/document lists
+    and a combined history list for backward compatibility.
     """
-
-    history = (
-        _get_persistent_history()
-    )
+    website_pages = _get_persistent_website_knowledge()
+    document_sources = _get_persistent_document_knowledge()
+    history = document_sources + website_pages
 
     return jsonify({
-        "history":
-            history
+        "history": history,
+        "website_sources": website_pages,
+        "website_pages": website_pages,
+        "document_sources": document_sources,
+        "website_chunks_count": sum(p.get("chunk_count", 0) for p in website_pages),
+        "document_chunks_count": sum(d.get("chunk_count", 0) for d in document_sources),
     })
 
 
@@ -967,20 +1193,55 @@ def get_training_history():
 # ============================================================
 
 @admin_bp.route(
-    "/api/admin/source/<source_id>",
+    "/api/admin/source/<path:source_id>",
     methods=["DELETE"]
 )
 def delete_training_source(
     source_id
 ):
-
     """
-    Deletes any training folder or document.
-
-    Removes corresponding vectors from the
-    knowledge base and cleans disk.
+    Deletes any training document, scraped webpage, or entire website source.
+    Removes corresponding vectors from FAISS and Supabase and cleans disk.
     """
+    rag = RAGService.get_instance()
 
+    # Check if target is an individual scraped webpage
+    website_pages = _get_persistent_website_knowledge()
+    page_match = next(
+        (
+            p for p in website_pages
+            if str(p.get("id")) == str(source_id)
+            or str(p.get("url")) == str(source_id)
+            or str(p.get("item_key")) == str(source_id)
+        ),
+        None
+    )
+
+    if page_match:
+        page_url = page_match.get("url") or page_match.get("item_key")
+        # 1. Remove item from KnowledgeStore
+        KnowledgeStore.delete_items(KnowledgeStore.WEBSITE_SOURCE_ID, [page_url])
+        # 2. Remove URL from scrape_state
+        StorageService.remove_scrape_page(page_url)
+        # 3. Remove vectors from FAISS
+        removed_chunks = rag.delete_source_items(KnowledgeStore.WEBSITE_SOURCE_ID, [page_url])
+        removed_chunks += rag.delete_source(str(source_id))
+        # 4. Remove vectors from Supabase
+        try:
+            from app.services.supabase_service import SupabaseVectorService
+            SupabaseVectorService.get_instance().delete_item_key(page_url)
+        except Exception as e:
+            print(f"[Admin] Supabase item_key delete note: {e}")
+
+        return jsonify({
+            "status": "success",
+            "deleted_source": page_match.get("title") or page_url,
+            "removed_chunks": removed_chunks,
+            "remaining_chunks": rag.get_stats()["total_chunks"],
+            "message": f"Removed page '{page_match.get('title')}': {removed_chunks} vector(s) removed."
+        })
+
+    # Normal document or source deletion
     deleted_entry = (
         StorageService.delete_history_entry(
             source_id
@@ -2198,7 +2459,7 @@ def get_document_content(
 # ============================================================
 
 @admin_bp.route(
-    "/api/admin/source-preview/<source_id>",
+    "/api/admin/source-preview/<path:source_id>",
     methods=["GET"]
 )
 def get_source_preview(
@@ -2206,13 +2467,8 @@ def get_source_preview(
 ):
 
     """
-    Returns detailed preview content for any
-    training source.
-
-    Local data is preferred.
-
-    Supabase persistent chunks are used
-    as a fallback after Render redeployment.
+    Returns detailed preview content for any training source,
+    including individual scraped webpages, full website crawls, and documents.
     """
 
     history = (
@@ -2220,33 +2476,63 @@ def get_source_preview(
     )
 
     target = next(
-
         (
             h
-
             for h in history
-
-            if str(
-                h.get("id")
-            )
-            == str(
-                source_id
-            )
+            if str(h.get("id")) == str(source_id)
+            or str(h.get("url")) == str(source_id)
+            or str(h.get("item_key")) == str(source_id)
         ),
-
         None
     )
 
     if not target:
-
         return jsonify({
-            "error":
-                "Training source not found"
+            "error": "Training source not found"
         }), 404
 
     rag = (
         RAGService.get_instance()
     )
+
+    # Individual Scraped Webpage
+    if target.get("source_type") == "website" and target.get("url"):
+        page_url = target.get("url")
+        with rag._lock:
+            page_chunks = [
+                c for c in rag._chunks
+                if c.get("item_key") == page_url or (c.get("metadata") or {}).get("url") == page_url
+            ]
+
+        if not page_chunks:
+            page_chunks = [
+                c for c in _get_supabase_source_chunks(KnowledgeStore.WEBSITE_SOURCE_ID)
+                if c.get("item_key") == page_url or (c.get("metadata") or {}).get("url") == page_url
+            ]
+
+        page_text = target.get("text", "")
+        if not page_text:
+            stored = KnowledgeStore.get_items(KnowledgeStore.WEBSITE_SOURCE_ID)
+            if page_url in stored:
+                page_text = stored[page_url].get("text", "")
+
+        return jsonify({
+            "status": "success",
+            "source_type": "website_page",
+            "title": target.get("title") or page_url,
+            "url": page_url,
+            "date": target.get("date"),
+            "total_chunks": len(page_chunks) or target.get("chunk_count", 0),
+            "text": page_text,
+            "sample_chunks": [
+                {
+                    "id": c.get("chunk_id") or c.get("id"),
+                    "text": c.get("text", "")[:350] + ("..." if len(c.get("text", "")) > 350 else ""),
+                    "metadata": c.get("metadata", {})
+                }
+                for c in page_chunks[:15]
+            ]
+        })
 
     # ========================================================
     # LOCAL FAISS SOURCE CHUNKS

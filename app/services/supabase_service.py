@@ -201,6 +201,23 @@ class SupabaseService:
             logger.exception("[Supabase] Error deleting source '%s': %s", source_id, e)
         return False
 
+    def delete_item_key(self, item_key):
+        """Deletes chunks belonging to item_key (e.g. scraped page URL) from Supabase."""
+        if not self.is_enabled or not item_key:
+            return False
+        endpoint = f"{self.url}/rest/v1/{self.table}?item_key=eq.{item_key}"
+        headers = self._headers()
+        try:
+            res = requests.delete(endpoint, headers=headers, timeout=30)
+            if res.status_code in (200, 204):
+                logger.info("[Supabase] Deleted item_key '%s' from Supabase.", item_key)
+                return True
+            else:
+                logger.error("[Supabase] Delete item_key failed HTTP %s: %s", res.status_code, res.text)
+        except Exception as e:
+            logger.exception("[Supabase] Error deleting item_key '%s': %s", item_key, e)
+        return False
+
     def reset_table(self):
         """Empties the vectors table in Supabase."""
         if not self.is_enabled:

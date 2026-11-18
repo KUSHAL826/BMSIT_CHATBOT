@@ -185,12 +185,27 @@
 
     </main>
 
-    <!-- Training History Table -->
-    <section class="history-section">
-      <div class="panel-header">
+    <!-- ======================================================== -->
+    <!-- SECTION 1: 🌐 Website Scraping Knowledge Base -->
+    <!-- ======================================================== -->
+    <section class="history-section" style="margin-bottom: 28px;">
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
         <div>
-          <h2 class="panel-title">📜 Knowledge Training History</h2>
-          <p class="panel-desc">Individual training sources. Deleting any item immediately updates the FAISS vector index.</p>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 22px;">🌐</span>
+            <h2 class="panel-title" style="margin: 0;">Website Scraping Knowledge Base</h2>
+          </div>
+          <p class="panel-desc" style="margin-top: 6px;">
+            Individual web pages crawled from the BMSIT college website. Each page is tracked with its title, URL, and indexed vector chunks.
+          </p>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+          <div style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #38bdf8; font-weight: 600;">
+            📄 {{ website_pages|length }} Page(s) Scraped
+          </div>
+          <div style="background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #c084fc; font-weight: 600;">
+            🧩 {{ website_chunks_count }} Web Chunks Active
+          </div>
         </div>
       </div>
 
@@ -198,38 +213,50 @@
         <table class="history-table">
           <thead>
             <tr>
-              <th>Date & Time (IST)</th>
-              <th>Source & Type</th>
+              <th style="min-width: 300px;">Web Page Title & URL</th>
+              <th>Vector Chunks</th>
               <th>Status</th>
-              <th>FAISS Chunks</th>
-              <th>Changes / Details</th>
-              <th>Actions</th>
+              <th>Last Scraped</th>
+              <th>Content Size</th>
+              <th style="text-align: right;">Actions</th>
             </tr>
           </thead>
-          <tbody id="history-table-body">
-            {% if history %}
-              {% for item in history %}
-                <tr id="history-row-{{ item.id }}">
-                  <td>{{ item.date }}</td>
+          <tbody id="website-table-body">
+            {% if website_pages %}
+              {% for page in website_pages %}
+                <tr id="history-row-{{ page.id }}">
                   <td>
-                    <div class="source-cell">
-                      <span class="badge-type badge-{{ item.file_type }}">{{ item.file_type|upper }}</span>
-                      <span>{{ item.source }}</span>
+                    <div style="display: flex; flex-direction: column; gap: 4px;">
+                      <div style="font-weight: 600; color: #f1f5f9; font-size: 13.5px; display: flex; align-items: center; gap: 8px;">
+                        <span class="badge-type badge-web">WEB</span>
+                        <span>{{ page.title }}</span>
+                      </div>
+                      {% if page.url %}
+                        <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; font-size: 11.5px; text-decoration: none; word-break: break-all; opacity: 0.85;" title="Open college page in new tab">
+                          {{ page.url }} ↗
+                        </a>
+                      {% endif %}
                     </div>
                   </td>
+                  <td><strong>{{ page.chunk_count }}</strong></td>
                   <td>
-                    <span class="status-badge status-{{ item.status|lower }}">
-                      ● {{ item.status }}
+                    <span class="status-badge status-{{ page.status|lower|replace(' ', '-') }}">
+                      ● {{ page.status }}
                     </span>
                   </td>
-                  <td><strong>{{ item.chunk_count }}</strong></td>
-                  <td>{{ item.changes }}</td>
-                  <td>
-                    <div style="display: flex; gap: 8px; align-items: center;">
-                      <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;" data-id="{{ item.id }}" data-file="{{ item.source }}" data-type="{{ item.source_type }}" title="View Knowledge Content">
+                  <td><span style="font-size: 12px; color: #94a3b8;">{{ page.date }}</span></td>
+                  <td><span style="font-size: 12px; color: #94a3b8;">{{ page.changes or (page.chars ~ ' chars') if page.chars else 'Indexed' }}</span></td>
+                  <td style="text-align: right;">
+                    <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end;">
+                      <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;" data-id="{{ page.id }}" data-file="{{ page.title }}" data-url="{{ page.url }}" data-type="website_page" title="View Scraped Content">
                         👁️ View
                       </button>
-                      <button class="btn-delete btn-delete-source" data-id="{{ item.id }}" data-name="{{ item.source }}">
+                      {% if page.url %}
+                        <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="padding: 6px 10px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center;" title="Open external page">
+                          ↗ Visit
+                        </a>
+                      {% endif %}
+                      <button class="btn-delete btn-delete-source" data-id="{{ page.id }}" data-name="{{ page.title }}" title="Delete this page from vector index">
                         🗑️ Delete
                       </button>
                     </div>
@@ -238,8 +265,86 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="6" style="text-align: center; color: #64748b; padding: 24px;">
-                  No training history found. Start by clicking <strong>Scrape Now</strong> or uploading documents above.
+                <td colspan="6" style="text-align: center; color: #64748b; padding: 32px 16px;">
+                  🌐 No website pages scraped yet. Click <strong>⚡ Scrape Now</strong> above to start crawling the BMSIT website.
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ======================================================== -->
+    <!-- SECTION 2: 📄 Uploaded Documents Knowledge Base -->
+    <!-- ======================================================== -->
+    <section class="history-section">
+      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 22px;">📄</span>
+            <h2 class="panel-title" style="margin: 0;">Document Uploads Knowledge Base</h2>
+          </div>
+          <p class="panel-desc" style="margin-top: 6px;">
+            Institutional documents uploaded by college administrators (PDF, DOCX, DOC, CSV). Files are split into semantic sections and vectorized into RAG.
+          </p>
+        </div>
+        <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+          <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #34d399; font-weight: 600;">
+            📁 {{ document_sources|length }} Document(s) Uploaded
+          </div>
+          <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #fbbf24; font-weight: 600;">
+            🧩 {{ document_chunks_count }} Document Chunks Active
+          </div>
+        </div>
+      </div>
+
+      <div class="table-responsive">
+        <table class="history-table">
+          <thead>
+            <tr>
+              <th style="min-width: 260px;">Document Name & Type</th>
+              <th>Uploaded Date & Time (IST)</th>
+              <th>Status</th>
+              <th>Vector Chunks</th>
+              <th>Changes / Details</th>
+              <th style="text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="document-table-body">
+            {% if document_sources %}
+              {% for doc in document_sources %}
+                <tr id="history-row-{{ doc.id }}">
+                  <td>
+                    <div class="source-cell">
+                      <span class="badge-type badge-{{ doc.file_type }}">{{ doc.file_type|upper }}</span>
+                      <span style="font-weight: 600;">{{ doc.source }}</span>
+                    </div>
+                  </td>
+                  <td><span style="font-size: 12px; color: #94a3b8;">{{ doc.date }}</span></td>
+                  <td>
+                    <span class="status-badge status-{{ doc.status|lower|replace(' ', '-') }}">
+                      ● {{ doc.status }}
+                    </span>
+                  </td>
+                  <td><strong>{{ doc.chunk_count }}</strong></td>
+                  <td><span style="font-size: 12px; color: #94a3b8;">{{ doc.changes }}</span></td>
+                  <td style="text-align: right;">
+                    <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end;">
+                      <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;" data-id="{{ doc.id }}" data-file="{{ doc.source }}" data-type="document" title="View Document Content">
+                        👁️ View
+                      </button>
+                      <button class="btn-delete btn-delete-source" data-id="{{ doc.id }}" data-name="{{ doc.source }}" title="Delete document and its vectors">
+                        🗑️ Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              {% endfor %}
+            {% else %}
+              <tr>
+                <td colspan="6" style="text-align: center; color: #64748b; padding: 32px 16px;">
+                  📄 No uploaded documents found. Drag & drop PDF, Word, or CSV files into the upload area above to index them.
                 </td>
               </tr>
             {% endif %}
