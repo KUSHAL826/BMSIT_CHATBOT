@@ -9,4 +9,5 @@ This file is used to keep the repository active so that **GitHub Actions schedul
 
 ---
 
-
+## generate secret key:
+## python -c "import secrets; print(secrets.token_hex(32))"

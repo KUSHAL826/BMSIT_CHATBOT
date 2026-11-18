@@ -45,102 +45,42 @@ services:
     healthCheckPath: /health
 
     envVars:
-      # --- secrets: prompted once at blueprint creation, never stored in git ---
+      # --- Admin & Auth ---
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: SECRET_KEY
+        sync: false
+
+      # --- Gemini API Keys ---
       - key: GEMINI_API_KEY
         sync: false
       - key: GEMINI_API_KEYS
         sync: false
-      - key: SECRET_KEY
-        generateValue: true
-      - key: ADMIN_PASSWORD
-        sync: false
 
-      # --- token strategy ---
-      - key: EMBED_CACHE_ENABLED
-        value: "true"
-      - key: EMBED_CACHE_MAX_VECTORS
-        value: "200000"
-      - key: EMBED_DAILY_TOKEN_BUDGET
-        value: "400000"
-      - key: EMBED_MAX_CHUNKS_PER_RUN
-        value: "600"
-      - key: SCRAPE_MIN_PAGE_TOKENS
-        value: "80"
-
-      # --- chunking ---
-      - key: CHUNK_TARGET_TOKENS
-        value: "450"
-      - key: CHUNK_MAX_TOKENS
-        value: "550"
-      - key: CHUNK_MIN_TOKENS
-        value: "60"
-      - key: CHUNK_OVERLAP_TOKENS
-        value: "30"
-
-      # --- embeddings ---
-      - key: EMBED_MODEL
-        value: gemini-embedding-001
-      - key: EMBEDDING_DIM
-        value: "768"
-      - key: EMBED_MAX_BATCH_TEXTS
-        value: "100"
-      - key: EMBED_MAX_BATCH_TOKENS
-        value: "20000"
-      - key: EMBED_MAX_INPUT_TOKENS
-        value: "2048"
-      # Low concurrency keeps peak memory inside 512 MB.
-      - key: EMBED_MAX_CONCURRENCY
-        value: "2"
-      - key: EMBED_TIMEOUT
-        value: "60"
-      - key: EMBED_RETRIES
-        value: "2"
-      - key: EMBED_MIN_INTERVAL
-        value: "0.5"
-      - key: EMBED_KEY_COOLDOWN
-        value: "3600"
-      - key: EMBED_COMMIT_SLICE_CHUNKS
-        value: "150"
-
-      # --- crawler ---
+      # --- Crawler Settings ---
       - key: BMSIT_DEFAULT_URL
         value: https://bmsit.ac.in/
       - key: SCRAPE_DEPTH
         value: "4"
       - key: SCRAPE_MAX_PAGES
         value: "800"
-      - key: SCRAPE_BOILERPLATE_RATIO
-        value: "0.30"
-      - key: SCRAPE_REQUEST_TIMEOUT
-        value: "10"
-      - key: SCRAPE_DELAY
-        value: "0.12"
+      - key: SCRAPE_MIN_PAGE_TOKENS
+        value: "80"
 
-      # --- daily delta run (needs a non-sleeping instance to fire reliably) ---
-      - key: SCHEDULE_TIME
-        value: "07:00"
-      - key: SCHEDULE_TIMEZONE
-        value: Asia/Kolkata
+      # --- Supabase Vector Store ---
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_KEY
+        sync: false
+      - key: SUPABASE_TABLE
+        value: vectors
+      - key: SUPABASE_DB_URL
+        sync: false
 
-      # --- retrieval / chat ---
+      # --- Retrieval & Chat ---
       - key: TOP_K
-        value: "12"
-      - key: CHAT_TIMEOUT
-        value: "45"
-      - key: MAX_OUTPUT_TOKENS
-        value: "0"
-      - key: GEMINI_MODEL
-        value: gemini-3.5-flash-lite
-      - key: CHAT_MODELS
-        value: gemini-3.5-flash-lite,gemini-2.0-flash,gemini-1.5-flash
+        value: "6"
 
-      # --- server ---
-      # Render routes external traffic into the container, so bind to 0.0.0.0.
-      - key: HOST
-        value: 0.0.0.0
-      - key: DEBUG
-        value: "false"
-      - key: LOG_LEVEL
-        value: INFO
+      # --- Runtime ---
       - key: PYTHON_VERSION
         value: 3.13.7

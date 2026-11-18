@@ -47,7 +47,7 @@ _SPEC = {
     "PORT": ("int", 5000),
     "DEBUG": ("bool", False),
     "LOG_LEVEL": ("str", "INFO"),
-    "SECRET_KEY": ("str", ""),
+    "SECRET_KEY": ("str", "bmsit-ai-secret-key-2026-supersecure"),
     "ADMIN_PASSWORD": ("str", "admin123"),
 
     # Crawler
@@ -87,7 +87,7 @@ _SPEC = {
     "EMBED_DAILY_TOKEN_BUDGET": ("int", 0),
 
     # Retrieval / chat
-    "TOP_K": ("int", 12),
+    "TOP_K": ("int", 6),
     "CHAT_TIMEOUT": ("int", 45),
     "MAX_OUTPUT_TOKENS": ("int", 0),
     "GEMINI_MODEL": ("str", "gemini-3.5-flash-lite"),
@@ -96,6 +96,7 @@ _SPEC = {
     # Supabase Vector Store
     "SUPABASE_URL": ("str", ""),
     "SUPABASE_KEY": ("str", ""),
+    "SUPABASE_SECRET_KEY": ("str", ""),
     "SUPABASE_SERVICE_ROLE_KEY": ("str", ""),
     "SUPABASE_ANON_KEY": ("str", ""),
     "SUPABASE_TABLE": ("str", "vectors"),
@@ -259,10 +260,19 @@ class Config:
     # ------------------------------------------------------------------
     # Supabase Vector Store
     # ------------------------------------------------------------------
-    SUPABASE_URL = _get("SUPABASE_URL")
-    SUPABASE_KEY = _get("SUPABASE_KEY") or _get("SUPABASE_SERVICE_ROLE_KEY") or _get("SUPABASE_ANON_KEY") or ""
-    SUPABASE_TABLE = _get("SUPABASE_TABLE") or "vectors"
-    SUPABASE_DB_URL = _get("SUPABASE_DB_URL")
+    SUPABASE_URL = (_get("SUPABASE_URL") or "").rstrip("/")
+    SUPABASE_KEY = (
+        _get("SUPABASE_KEY")
+        or _get("SUPABASE_SECRET_KEY")
+        or _get("SUPABASE_SERVICE_ROLE_KEY")
+        or _get("SUPABASE_ANON_KEY")
+        or ""
+    ).strip()
+    SUPABASE_TABLE = (_get("SUPABASE_TABLE") or "vectors").strip()
+    _raw_db_url = (_get("SUPABASE_DB_URL") or "").strip()
+    if _raw_db_url.startswith("SUPABASE_DB_URL="):
+        _raw_db_url = _raw_db_url[len("SUPABASE_DB_URL="):].strip()
+    SUPABASE_DB_URL = _raw_db_url
 
     @classmethod
     def is_supabase_enabled(cls):
