@@ -125,91 +125,6 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
 """
 
 
-class FAISSIntentClassifier:
-    """
-    FAISS Semantic Search Intent Classifier:
-    Zero hardcoded keyword lists or static word dictionaries.
-    Uses FAISS IndexFlatIP (cosine similarity) to classify user input vectors
-    into conversational intents: 'greeting', 'conclusion' (farewells & gratitude), or 'college_query'.
-    """
-    _instance = None
-    DIM = 256
-
-    def __init__(self):
-        self._anchors = [
-            ("greeting", "hello hi hey namaste good morning good evening welcome greetings howdy who are you what is your name"),
-            ("greeting", "hi there hello assistant greetings welcome to college who are you"),
-            ("conclusion", "bye goodbye see you take care farewell cya good night have a good day thank you thanks thx appreciate it"),
-            ("conclusion", "thank you thanks thx thank you so much grateful appreciate it goodbye bye"),
-            ("college_query", "what is the fees for cse cluster hostel admission cutoff placement faculty associate hod"),
-            ("college_query", "bmsit syllabus courses departments branches principal wardens exam comedk kcet fees eligibility tell me about"),
-        ]
-        self._labels = [a[0] for a in self._anchors]
-        matrix = np.array([self._vectorize(a[1]) for a in self._anchors], dtype=np.float32)
-
-        if faiss is not None:
-            try:
-                self._faiss_index = faiss.IndexFlatIP(self.DIM)
-                self._faiss_index.add(matrix)
-            except Exception:
-                self._faiss_index = None
-        else:
-            self._faiss_index = None
-        self._matrix = matrix
-
-    @classmethod
-    def get_instance(cls) -> "FAISSIntentClassifier":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def _vectorize(self, text: str) -> np.ndarray:
-        vec = np.zeros(self.DIM, dtype=np.float32)
-        text = text.lower().strip()
-        tokens = text.split()
-        for i, token in enumerate(tokens):
-            h1 = int(hashlib.md5(token.encode("utf-8")).hexdigest()[:8], 16) % self.DIM
-            vec[h1] += 1.5
-            for j in range(len(token) - 2):
-                tri = token[j:j+3]
-                h_tri = int(hashlib.md5(tri.encode("utf-8")).hexdigest()[:8], 16) % self.DIM
-                vec[h_tri] += 0.8
-            if i < len(tokens) - 1:
-                bi = token + "_" + tokens[i+1]
-                h_bi = int(hashlib.md5(bi.encode("utf-8")).hexdigest()[:8], 16) % self.DIM
-                vec[h_bi] += 1.2
-        norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec /= norm
-        return vec
-
-    def classify(self, query: str) -> str:
-        clean = (query or "").strip()
-        if not clean:
-            return "empty"
-
-        words = clean.split()
-        qv = self._vectorize(clean)
-        qv_matrix = np.array([qv], dtype=np.float32)
-
-        if self._faiss_index is not None:
-            scores, indices = self._faiss_index.search(qv_matrix, len(self._labels))
-            best_idx = int(indices[0][0])
-            top_label = self._labels[best_idx]
-            college_score = max(float(s) for s, idx in zip(scores[0], indices[0]) if self._labels[idx] == "college_query")
-        else:
-            scores = np.dot(self._matrix, qv)
-            best_idx = int(np.argmax(scores))
-            top_label = self._labels[best_idx]
-            college_score = max(float(scores[i]) for i, l in enumerate(self._labels) if l == "college_query")
-
-        # Substantive query features override greeting (e.g. "hello what are the cse fees?")
-        if top_label == "greeting" and (len(words) >= 4 or college_score > 0.15):
-            return "college_query"
-
-        return top_label
-
-
 class GeminiService:
     _session: Optional[requests.Session] = None
     _session_lock = threading.Lock()
@@ -338,11 +253,6 @@ class GeminiService:
                     "Please keep interactions courteous. How may I assist you with information about BMSIT?"
                 )
 
-        # 3. Conversational greetings and conclusions via FAISS semantic search
-        intent = FAISSIntentClassifier.get_instance().classify(msg_lower)
-        if intent in ("greeting", "conclusion"):
-            return True, None
-
         # Check for obvious external questions (recipes, generic coding, outside trivia)
         unrelated_signals = [
             r"who won the (world cup|ipl|olympics|fifa)",
@@ -385,38 +295,6 @@ class GeminiService:
                 "reply": rejection,
                 "sources": [],
                 "guardrail_triggered": True,
-                "session_id": session_id
-            }
-
-        # FAISS semantic search intent classification: greeting & conclusion (<= 3 lines)
-        intent = FAISSIntentClassifier.get_instance().classify(user_message)
-        if intent == "greeting":
-            greeting_reply = (
-                "👋 **Hello and welcome to BMSIT&M!**\n"
-                "I am your official AI Assistant for B.M.S. Institute of Technology and Management.\n"
-                "How may I assist you with admissions, courses, hostels, or faculty today?"
-            )
-            history_mgr = LangChainHistoryManager.get_instance()
-            history_mgr.append_turn(session_id, user_message, greeting_reply)
-            return {
-                "reply": greeting_reply,
-                "sources": [],
-                "guardrail_triggered": False,
-                "session_id": session_id
-            }
-
-        if intent == "conclusion":
-            conclusion_reply = (
-                "👋 **Goodbye!**\n"
-                "Feel free to return whenever you have questions regarding BMSIT&M.\n"
-                "Have a great day ahead!"
-            )
-            history_mgr = LangChainHistoryManager.get_instance()
-            history_mgr.append_turn(session_id, user_message, conclusion_reply)
-            return {
-                "reply": conclusion_reply,
-                "sources": [],
-                "guardrail_triggered": False,
                 "session_id": session_id
             }
 
@@ -752,21 +630,6 @@ ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTL
         """
         clean_query = (query or "").strip()
         q_lower = clean_query.lower()
-
-        # FAISS Semantic Search Intent Classification (Zero hardcoded word lists)
-        intent = FAISSIntentClassifier.get_instance().classify(clean_query)
-        if intent == "greeting":
-            return (
-                "👋 **Hello and welcome to BMSIT&M!**\n"
-                "I am your official AI Assistant for B.M.S. Institute of Technology and Management.\n"
-                "How may I assist you with admissions, courses, hostels, or faculty today?"
-            )
-        if intent == "conclusion":
-            return (
-                "👋 **Goodbye!**\n"
-                "Feel free to return whenever you have questions regarding BMSIT&M.\n"
-                "Have a great day ahead!"
-            )
 
         unknown_message = (
             "As of now, I don't have verified information regarding this in the BMSIT knowledge base. "
