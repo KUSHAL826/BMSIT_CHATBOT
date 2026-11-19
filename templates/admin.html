@@ -263,11 +263,149 @@
         </div>
       </div>
 
-      <div class="table-responsive">
+      <!-- Drop Down Menu & Category Controls Bar -->
+      <div class="website-controls-bar">
+        <div class="controls-left">
+          <!-- 1. Category Dropdown Menu -->
+          <div class="dropdown-filter-item">
+            <label for="category-dropdown-select" class="dropdown-filter-label">
+              <span>📂</span> Category:
+            </label>
+            <select id="category-dropdown-select" class="custom-dropdown-select" title="Filter by institutional category">
+              <option value="all">🌐 All Categories ({{ website_pages|length }} pages)</option>
+              {% if website_categories %}
+                {% for cat_name, cat_pages in website_categories.items() %}
+                  <option value="{{ cat_name|lower|replace(' ', '-')|replace('&', 'and') }}">
+                    {% if 'Department' in cat_name %}🎓{% elif 'Admission' in cat_name %}📝{% elif 'Placement' in cat_name %}💼{% elif 'Hostel' in cat_name or 'Campus' in cat_name %}🏢{% elif 'Research' in cat_name %}🔬{% elif 'Governance' in cat_name %}🏛️{% else %}🌐{% endif %} {{ cat_name }} ({{ cat_pages|length }})
+                  </option>
+                {% endfor %}
+              {% endif %}
+            </select>
+          </div>
+
+          <!-- 2. Display View Mode Dropdown Menu -->
+          <div class="dropdown-filter-item">
+            <label for="view-mode-select" class="dropdown-filter-label">
+              <span>📑</span> View:
+            </label>
+            <select id="view-mode-select" class="custom-dropdown-select" title="Toggle between drop down accordion groups and flat table">
+              <option value="accordion">📂 Drop Down Groups (Accordion)</option>
+              <option value="flat">📋 Standard Table (All Links)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="controls-right">
+          <!-- 3. Real-Time Search Box -->
+          <div class="search-box-wrapper">
+            <span class="search-box-icon">🔍</span>
+            <input type="text" id="website-search-input" class="search-box-input" placeholder="Search pages, titles, or URLs..." autocomplete="off">
+            <button type="button" id="btn-clear-search" class="search-clear-btn" style="display: none;" title="Clear search">✕</button>
+          </div>
+
+          <!-- 4. Accordion Expand/Collapse All Buttons -->
+          <div id="accordion-action-buttons" class="accordion-action-group">
+            <button type="button" class="btn-action-ghost" id="btn-expand-all" title="Expand all categories">Expand All</button>
+            <button type="button" class="btn-action-ghost" id="btn-collapse-all" title="Collapse all categories">Collapse All</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mode 1: Accordion Drop Down Groups Container (Default) -->
+      <div id="website-accordion-container" class="website-accordion-wrapper">
+        {% if website_categories %}
+          {% for cat_name, cat_pages in website_categories.items() %}
+            {% set cat_chunks = cat_pages|map(attribute='chunk_count')|sum %}
+            {% set cat_slug = cat_name|lower|replace(' ', '-')|replace('&', 'and') %}
+            <div class="category-accordion-card" data-category="{{ cat_slug }}" id="cat-card-{{ cat_slug }}">
+              <button type="button" class="category-accordion-header" aria-expanded="true">
+                <div class="cat-header-title-wrap">
+                  <span class="cat-header-icon">
+                    {% if 'Department' in cat_name %}🎓{% elif 'Admission' in cat_name %}📝{% elif 'Placement' in cat_name %}💼{% elif 'Hostel' in cat_name or 'Campus' in cat_name %}🏢{% elif 'Research' in cat_name %}🔬{% elif 'Governance' in cat_name %}🏛️{% else %}🌐{% endif %}
+                  </span>
+                  <span class="cat-header-name">{{ cat_name }}</span>
+                  <span class="cat-pill-count">{{ cat_pages|length }} Page{% if cat_pages|length != 1 %}s{% endif %}</span>
+                  <span class="cat-pill-chunks">{{ cat_chunks }} Chunks</span>
+                </div>
+                <div class="cat-header-actions">
+                  <span class="cat-header-chevron">▼</span>
+                </div>
+              </button>
+
+              <div class="category-accordion-body">
+                <div class="table-responsive" style="margin-top: 0;">
+                  <table class="history-table">
+                    <thead>
+                      <tr>
+                        <th style="min-width: 280px;">Web Page Title & URL</th>
+                        <th>Vector Chunks</th>
+                        <th>Status</th>
+                        <th>Last Scraped</th>
+                        <th>Content Size</th>
+                        <th style="text-align: right;">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for page in cat_pages %}
+                        <tr id="history-row-{{ page.id }}" class="cat-page-row" data-category="{{ cat_slug }}" data-title="{{ page.title|lower }}" data-url="{{ (page.url or '')|lower }}">
+                          <td>
+                            <div style="display: flex; flex-direction: column; gap: 4px;">
+                              <div style="font-weight: 600; color: #f1f5f9; font-size: 13.5px; display: flex; align-items: center; gap: 8px;">
+                                <span class="badge-type badge-web">WEB</span>
+                                <span>{{ page.title }}</span>
+                              </div>
+                              {% if page.url %}
+                                <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; font-size: 11.5px; text-decoration: none; word-break: break-all; opacity: 0.85;" title="Open college page in new tab">
+                                  {{ page.url }} ↗
+                                </a>
+                              {% endif %}
+                            </div>
+                          </td>
+                          <td><strong>{{ page.chunk_count }}</strong></td>
+                          <td>
+                            <span class="status-badge status-{{ page.status|lower|replace(' ', '-') }}">
+                              ● {{ page.status }}
+                            </span>
+                          </td>
+                          <td><span style="font-size: 12px; color: #94a3b8;">{{ page.date }}</span></td>
+                          <td><span style="font-size: 12px; color: #94a3b8;">{{ page.changes or (page.chars ~ ' chars') if page.chars else 'Indexed' }}</span></td>
+                          <td style="text-align: right;">
+                            <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end;">
+                              <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;" data-id="{{ page.id }}" data-file="{{ page.title }}" data-url="{{ page.url }}" data-type="website_page" title="View Scraped Content">
+                                👁️ View
+                              </button>
+                              {% if page.url %}
+                                <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="padding: 6px 10px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center;" title="Open external page">
+                                  ↗ Visit
+                                </a>
+                              {% endif %}
+                              <button class="btn-delete btn-delete-source" data-id="{{ page.id }}" data-name="{{ page.title }}" title="Delete this page from vector index">
+                                🗑️ Delete
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          {% endfor %}
+        {% else %}
+          <div style="text-align: center; color: #64748b; padding: 36px 16px; background: rgba(0,0,0,0.15); border-radius: 12px;">
+            🌐 No website pages scraped yet. Click <strong>⚡ Scrape Now</strong> above to start crawling the BMSIT website.
+          </div>
+        {% endif %}
+      </div>
+
+      <!-- Mode 2: Standard Full Table Container -->
+      <div id="website-flat-table-container" class="table-responsive" style="display: none;">
         <table class="history-table">
           <thead>
             <tr>
-              <th style="min-width: 300px;">Web Page Title & URL</th>
+              <th style="min-width: 280px;">Web Page Title & URL</th>
+              <th>Category</th>
               <th>Vector Chunks</th>
               <th>Status</th>
               <th>Last Scraped</th>
@@ -275,10 +413,11 @@
               <th style="text-align: right;">Actions</th>
             </tr>
           </thead>
-          <tbody id="website-table-body">
+          <tbody id="website-flat-tbody">
             {% if website_pages %}
               {% for page in website_pages %}
-                <tr id="history-row-{{ page.id }}">
+                {% set cat_slug = page.category|lower|replace(' ', '-')|replace('&', 'and') %}
+                <tr id="flat-row-{{ page.id }}" class="flat-page-row" data-category="{{ cat_slug }}" data-title="{{ page.title|lower }}" data-url="{{ (page.url or '')|lower }}">
                   <td>
                     <div style="display: flex; flex-direction: column; gap: 4px;">
                       <div style="font-weight: 600; color: #f1f5f9; font-size: 13.5px; display: flex; align-items: center; gap: 8px;">
@@ -291,6 +430,11 @@
                         </a>
                       {% endif %}
                     </div>
+                  </td>
+                  <td>
+                    <span class="badge-cat badge-cat-{{ cat_slug }}">
+                      {{ page.category }}
+                    </span>
                   </td>
                   <td><strong>{{ page.chunk_count }}</strong></td>
                   <td>
@@ -319,7 +463,7 @@
               {% endfor %}
             {% else %}
               <tr>
-                <td colspan="6" style="text-align: center; color: #64748b; padding: 32px 16px;">
+                <td colspan="7" style="text-align: center; color: #64748b; padding: 32px 16px;">
                   🌐 No website pages scraped yet. Click <strong>⚡ Scrape Now</strong> above to start crawling the BMSIT website.
                 </td>
               </tr>

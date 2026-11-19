@@ -400,20 +400,108 @@ def _build_supabase_history():
 
 def _clean_page_title(title, url):
     """Generates a clean human-friendly title for a scraped page."""
-    if title and str(title).strip() and str(title).strip().lower() not in ("none", "null", "unknown"):
-        clean = str(title).strip()
-        for suffix in (" | BMSIT&M", " - BMSIT&M", " | BMSIT", " - BMSIT", " - Bengaluru"):
-            if clean.endswith(suffix):
-                clean = clean[:-len(suffix)].strip()
-        return clean or str(title).strip()
+    clean = str(title).strip() if title else ""
+    for suffix in (" | BMSIT&M", " - BMSIT&M", " | BMSIT", " - BMSIT", " - Bengaluru"):
+        if clean.endswith(suffix):
+            clean = clean[:-len(suffix)].strip()
+
+    url_lower = str(url or "").lower()
+
+    # Specific known department & portal mapping
+    known_url_titles = {
+        "dep-cse.php": "Computer Science & Engineering (CSE)",
+        "dep-ise.php": "Information Science & Engineering (ISE)",
+        "dep-aiml.php": "Artificial Intelligence & Machine Learning (AIML)",
+        "dep-electrical.php": "Electrical & Electronics Engineering (EEE)",
+        "dep-ece.php": "Electronics & Communication Engineering (ECE)",
+        "dep-mech.php": "Mechanical Engineering",
+        "dep-civil.php": "Civil Engineering",
+        "dep-cse-cyber-mtech.php": "M.Tech. in Cyber Security",
+        "dep-cse-mtech.php": "M.Tech. in Computer Science & Engineering",
+        "dep-physics.php": "Department of Physics",
+        "dep-chemistry.php": "Department of Chemistry",
+        "dep-maths.php": "Department of Mathematics",
+        "dep-humanities.php": "Department of Humanities",
+        "fee-structure.php": "Fee Structure & Tuition",
+        "governing-body.php": "Governing Body & Board of Governors",
+        "hefc.php": "Higher Education Facilitation Center (HEFC)",
+        "admissions.php": "Admissions & Eligibility",
+        "admission.php": "Admissions",
+        "bis-corner.php": "BIS Corner",
+        "mou.php": "Memorandum of Understanding (MOU)",
+        "hostel.php": "Hostel Facilities & Accommodation",
+        "boys-hostel.php": "Boys Hostel",
+        "girls-hostel.php": "Girls Hostel",
+        "library.php": "Library & Information Center",
+        "placements.php": "Placements & Training",
+        "placement.php": "Placements & Training",
+        "mandatory-disclosure.php": "Mandatory Disclosure",
+        "naac.php": "NAAC Accreditation",
+        "nirf.php": "NIRF Ranking & Data",
+        "iqac.php": "Internal Quality Assurance Cell (IQAC)",
+        "principal.php": "Principal's Desk",
+        "contact.php": "Contact Us & Campus Location",
+        "contact-us.php": "Contact Us",
+    }
+
+    for path_key, mapped_title in known_url_titles.items():
+        if path_key in url_lower:
+            return mapped_title
+
+    if "comp-sif" in url_lower:
+        return "2nd International Conference on Computing for Sustainability (Comp-SIF 2026)"
+
+    generic_titles = {
+        "", "none", "null", "unknown", "about us", "about", "bmsit", "bmsit&m",
+        "home", "welcome", "bms institute of technology and management"
+    }
+    if clean and clean.lower() not in generic_titles:
+        return clean
 
     if url:
         path = str(url).replace("https://", "").replace("http://", "").rstrip("/").split("/", 1)
         if len(path) > 1 and path[1]:
-            last_segment = path[1].rsplit("/", 1)[-1].replace("-", " ").replace("_", " ").title()
-            return last_segment if last_segment else "BMSIT College Page"
-        return "BMSIT Home Page"
+            segment = path[1].rsplit("/", 1)[-1].replace(".php", "").replace(".html", "").replace("-", " ").replace("_", " ").title()
+            if segment:
+                return segment
+        return "BMSIT Official Portal (Home)"
+
     return "College Web Page"
+
+
+def _categorize_web_page(url: str, title: str) -> str:
+    """Categorizes a web page into a high-level college knowledge domain."""
+    combined = (f"{url} {title}").lower()
+    if any(k in combined for k in (
+        "dep-", "department", "engineering", "mtech", "m.tech", "b.e", "academic",
+        "syllabus", "curriculum", "cse", "ise", "aiml", "ece", "eee", "mech", "civil",
+        "physics", "chemistry", "math", "humanities", "mca", "mba"
+    )):
+        return "Departments & Academics"
+    if any(k in combined for k in (
+        "admission", "fee", "fees", "eligibility", "cutoff", "kcet", "comedk", "hefc", "quota", "seat"
+    )):
+        return "Admissions & Fees"
+    if any(k in combined for k in (
+        "placement", "recruit", "career", "training", "internship", "package", "hiring"
+    )):
+        return "Placements & Careers"
+    if any(k in combined for k in (
+        "hostel", "mess", "room", "warden", "library", "sport", "gym", "campus", "canteen",
+        "cafeteria", "transport", "bus", "facility", "facilities", "medical"
+    )):
+        return "Hostel & Campus Facilities"
+    if any(k in combined for k in (
+        "research", "project", "conference", "comp-sif", "mou", "publication", "patent",
+        "funded", "bis-corner", "journal"
+    )):
+        return "Research & Conferences"
+    if any(k in combined for k in (
+        "govern", "trust", "principal", "vision", "mission", "leadership", "administration",
+        "naac", "nirf", "iqac", "mandatory", "about"
+    )):
+        return "Governance & About Us"
+    return "General & Portals"
 
 
 def _get_persistent_website_knowledge():
@@ -570,10 +658,11 @@ def _get_persistent_website_knowledge():
         except Exception:
             pass
 
-    # Ensure chunk counts are at least 1 if page is indexed
+    # Ensure chunk counts and category classification are populated
     for p in pages:
         if p.get("chunk_count", 0) == 0 and p.get("chars", 0) > 0:
             p["chunk_count"] = max(1, p["chars"] // 500)
+        p["category"] = _categorize_web_page(p.get("url", ""), p.get("title", ""))
 
     # Sort pages: highest chunk count first, then by title
     pages.sort(key=lambda p: (p.get("chunk_count", 0), p.get("title", "")), reverse=True)
@@ -884,6 +973,26 @@ def admin_dashboard():
     document_sources = _get_persistent_document_knowledge()
     history = document_sources + website_pages
 
+    # Group website pages into organized categories for drop down menu navigation
+    category_order = [
+        "Departments & Academics",
+        "Admissions & Fees",
+        "Placements & Careers",
+        "Hostel & Campus Facilities",
+        "Research & Conferences",
+        "Governance & About Us",
+        "General & Portals"
+    ]
+    website_categories = {cat: [] for cat in category_order}
+    for p in website_pages:
+        cat = p.get("category") or _categorize_web_page(p.get("url", ""), p.get("title", ""))
+        p["category"] = cat
+        if cat not in website_categories:
+            website_categories[cat] = []
+        website_categories[cat].append(p)
+
+    website_categories = {k: v for k, v in website_categories.items() if v}
+
     website_chunks_count = sum(p.get("chunk_count", 0) for p in website_pages)
     document_chunks_count = sum(d.get("chunk_count", 0) for d in document_sources)
 
@@ -916,6 +1025,7 @@ def admin_dashboard():
 
         history=history,
         website_pages=website_pages,
+        website_categories=website_categories,
         document_sources=document_sources,
         website_chunks_count=website_chunks_count,
         document_chunks_count=document_chunks_count,
@@ -1249,10 +1359,19 @@ def get_training_history():
     document_sources = _get_persistent_document_knowledge()
     history = document_sources + website_pages
 
+    website_categories = {}
+    for p in website_pages:
+        cat = p.get("category") or _categorize_web_page(p.get("url", ""), p.get("title", ""))
+        p["category"] = cat
+        if cat not in website_categories:
+            website_categories[cat] = []
+        website_categories[cat].append(p)
+
     return jsonify({
         "history": history,
         "website_sources": website_pages,
         "website_pages": website_pages,
+        "website_categories": website_categories,
         "document_sources": document_sources,
         "website_chunks_count": sum(p.get("chunk_count", 0) for p in website_pages),
         "document_chunks_count": sum(d.get("chunk_count", 0) for d in document_sources),

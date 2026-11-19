@@ -6,6 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initDeleteHandlers();
   initDocumentViewerModal();
   initSettingsModal();
+  initWebsiteCategoryDropdowns();
   pollStatusIfRunning();
 });
 
@@ -577,5 +578,161 @@ function initDocumentViewerModal() {
       }
     });
   });
+}
+
+// -------------------------------------------------------------
+// Website Scraping Category Drop Down Menus & Accordion Filters
+// -------------------------------------------------------------
+function initWebsiteCategoryDropdowns() {
+  const catSelect = document.getElementById("category-dropdown-select");
+  const viewSelect = document.getElementById("view-mode-select");
+  const searchInput = document.getElementById("website-search-input");
+  const clearSearchBtn = document.getElementById("btn-clear-search");
+  const btnExpandAll = document.getElementById("btn-expand-all");
+  const btnCollapseAll = document.getElementById("btn-collapse-all");
+  const accordionContainer = document.getElementById("website-accordion-container");
+  const flatContainer = document.getElementById("website-flat-table-container");
+  const accordionActionGroup = document.getElementById("accordion-action-buttons");
+
+  if (!catSelect && !accordionContainer) return;
+
+  // 1. Accordion Header Toggle (Click to expand / collapse)
+  document.querySelectorAll(".category-accordion-header").forEach(header => {
+    header.addEventListener("click", () => {
+      const card = header.closest(".category-accordion-card");
+      if (card) {
+        card.classList.toggle("is-collapsed");
+        const isCollapsed = card.classList.contains("is-collapsed");
+        header.setAttribute("aria-expanded", !isCollapsed);
+      }
+    });
+  });
+
+  // 2. Expand All & Collapse All
+  if (btnExpandAll) {
+    btnExpandAll.addEventListener("click", () => {
+      document.querySelectorAll(".category-accordion-card").forEach(c => {
+        c.classList.remove("is-collapsed");
+        const h = c.querySelector(".category-accordion-header");
+        if (h) h.setAttribute("aria-expanded", "true");
+      });
+    });
+  }
+
+  if (btnCollapseAll) {
+    btnCollapseAll.addEventListener("click", () => {
+      document.querySelectorAll(".category-accordion-card").forEach(c => {
+        c.classList.add("is-collapsed");
+        const h = c.querySelector(".category-accordion-header");
+        if (h) h.setAttribute("aria-expanded", "false");
+      });
+    });
+  }
+
+  // 3. View Mode Toggle (Accordion vs Flat Table)
+  if (viewSelect) {
+    viewSelect.addEventListener("change", () => {
+      const mode = viewSelect.value;
+      if (mode === "flat") {
+        if (accordionContainer) accordionContainer.style.display = "none";
+        if (flatContainer) flatContainer.style.display = "block";
+        if (accordionActionGroup) accordionActionGroup.style.display = "none";
+      } else {
+        if (accordionContainer) accordionContainer.style.display = "flex";
+        if (flatContainer) flatContainer.style.display = "none";
+        if (accordionActionGroup) accordionActionGroup.style.display = "flex";
+      }
+      applyFilters();
+    });
+  }
+
+  // 4. Category Dropdown Filter
+  if (catSelect) {
+    catSelect.addEventListener("change", () => {
+      applyFilters();
+    });
+  }
+
+  // 5. Search Box Filter
+  if (searchInput) {
+    searchInput.addEventListener("input", () => {
+      if (clearSearchBtn) {
+        clearSearchBtn.style.display = searchInput.value.trim() ? "block" : "none";
+      }
+      applyFilters();
+    });
+  }
+
+  if (clearSearchBtn) {
+    clearSearchBtn.addEventListener("click", () => {
+      searchInput.value = "";
+      clearSearchBtn.style.display = "none";
+      applyFilters();
+      searchInput.focus();
+    });
+  }
+
+  // Master Filter Function combining Category and Search Query
+  function applyFilters() {
+    const selectedCat = catSelect ? catSelect.value : "all";
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : "";
+
+    // A. Filter Accordion View
+    const accordionCards = document.querySelectorAll(".category-accordion-card");
+    accordionCards.forEach(card => {
+      const cardCat = card.getAttribute("data-category");
+      const matchesCat = (selectedCat === "all" || cardCat === selectedCat);
+
+      if (!matchesCat) {
+        card.style.display = "none";
+        return;
+      }
+
+      // Filter rows inside this category card if search query exists
+      const rows = card.querySelectorAll("tbody tr.cat-page-row");
+      let visibleRowCount = 0;
+
+      rows.forEach(row => {
+        const title = row.getAttribute("data-title") || "";
+        const url = row.getAttribute("data-url") || "";
+        const matchesQuery = (!query || title.includes(query) || url.includes(query));
+
+        if (matchesQuery) {
+          row.style.display = "";
+          visibleRowCount++;
+        } else {
+          row.style.display = "none";
+        }
+      });
+
+      // Show card if it has visible rows or if query is empty
+      if (query && visibleRowCount === 0) {
+        card.style.display = "none";
+      } else {
+        card.style.display = "";
+        // If a specific category was selected or search query active, auto-expand
+        if (selectedCat !== "all" || query) {
+          card.classList.remove("is-collapsed");
+        }
+      }
+    });
+
+    // B. Filter Flat Table View
+    const flatRows = document.querySelectorAll("#website-flat-tbody tr.flat-page-row");
+    flatRows.forEach(row => {
+      const rowCat = row.getAttribute("data-category");
+      const title = row.getAttribute("data-title") || "";
+      const url = row.getAttribute("data-url") || "";
+
+      const matchesCat = (selectedCat === "all" || rowCat === selectedCat);
+      const matchesQuery = (!query || title.includes(query) || url.includes(query));
+
+      if (matchesCat && matchesQuery) {
+        row.style.display = "";
+      } else {
+        row.style.display = "none";
+      }
+    });
+  }
 }
 
