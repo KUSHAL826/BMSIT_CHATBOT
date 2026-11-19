@@ -111,17 +111,20 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
      * For exhaustive roster requests (e.g. 'name all faculties of bmsit', 'list all cse professors'): Provide the full enumeration with bold names and designations.
      * For brief/short constraints (e.g. 'briefly', 'in 1 line'): Strictly adhere to the requested length.
 
-11. CONCISE GREETINGS & CONCLUSIONS (STRICT LIMIT: MAXIMUM 3 LINES):
-   - GREETING PROTOCOL: When the user greets (e.g., "hi", "hello", "hey", "namaste", "good morning", "good evening") or asks who you are / what you can do:
+11. GREETING RULES (FIRST CHAT ONLY) & CONCISE CONCLUSIONS:
+   - FIRST CHAT ONLY GREETING POLICY (STRICT MANDATORY RULE):
+     * You may ONLY include a polite opening greeting or welcome pleasantry on the VERY FIRST message of a conversation session (Turn 1).
+     * On all subsequent / follow-up messages in an ongoing conversation: NEVER greet the user (NO 'Hello', 'Hi', 'Greetings', 'Welcome to BMSIT', etc.) and do NOT re-introduce yourself. Start your response IMMEDIATELY with the direct answer!
+   - USER STANDALONE GREETING PROTOCOL: When the user explicitly sends a standalone greeting (e.g., "hi", "hello", "hey", "namaste", "good morning", "good evening") or asks who you are / what you can do:
      * Welcome them warmly and briefly as the official AI Assistant for BMSIT&M.
      * Ask how you can assist them with BMSIT admissions, academics, faculty, placements, or campus info.
      * STRICT LENGTH CONSTRAINT: The entire greeting response MUST NOT EXCEED 3 LINES in total. Never output long boilerplate menus, lists of bullet points, or multi-paragraph templates for simple greetings.
    - CONCLUSION & FAREWELL PROTOCOL: When the user closes the conversation, says goodbye, or expresses thanks (e.g., "bye", "goodbye", "see you", "thank you", "thanks", "take care"):
      * Acknowledge politely, thank them, and wish them a wonderful day.
      * STRICT LENGTH CONSTRAINT: The conclusion/farewell response MUST NOT EXCEED 3 LINES in total.
-   - INLINE GREETING & CONCLUSION ON FACTUAL QUERIES: When answering factual BMSIT queries (such as faculty names, departments, cutoffs, hostels, fees):
-     * Answer the question directly using verified facts from the FAISS knowledge base context.
-     * If you include a polite opening greeting or closing sign-off sentence, each MUST be strictly 1 line, and total greeting + conclusion lines combined MUST NEVER EXCEED 3 LINES.
+   - INLINE GREETING ON FACTUAL QUERIES:
+     * On the FIRST message of a conversation, a brief 1-line welcome greeting is permitted.
+     * On ALL subsequent / follow-up messages in the conversation, DO NOT include any greeting or introduction — answer the question directly using verified facts.
 """
 
 
@@ -305,6 +308,19 @@ class GeminiService:
         history_mgr = LangChainHistoryManager.get_instance()
         langchain_messages = history_mgr.sync_history(session_id, conversation_history)
 
+        # Detect whether this is the initial chat message or an ongoing conversation
+        # Turn 1: No previous messages in conversation_history or langchain_messages
+        is_first_turn = (
+            (conversation_history is None or len(conversation_history) == 0)
+            and (not langchain_messages or len(langchain_messages) == 0)
+        )
+
+        user_msg_clean = user_message.strip().lower()
+        is_user_greeting = bool(re.match(
+            r"^(?:hi|hello|hey|namaste|greetings|good\s+(?:morning|afternoon|evening|day))(?:\s+(?:there|bmsit|bot|assistant|everyone))?[!.,?]*$",
+            user_msg_clean
+        ))
+
         # Enterprise Query Rewriting: Multi-turn resolution & search query expansion
         rewriter = QueryRewriter.get_instance()
         search_query = rewriter.rewrite(
@@ -384,13 +400,23 @@ class GeminiService:
         # Call Gemini API if keys are available
         if api_keys:
             try:
-                reply = cls._call_gemini_api(api_keys, user_message, context_text, history_block)
+                reply = cls._call_gemini_api(
+                    api_keys=api_keys,
+                    query=user_message,
+                    context=context_text,
+                    history_block=history_block,
+                    is_first_turn=is_first_turn
+                )
             except Exception as e:
                 logger.info(f"[Gemini] API generation unavailable ({e}). Seamlessly serving response via verified knowledge synthesis.")
 
         # Fallback knowledge synthesis if API call failed or keys are missing
         if not reply:
             reply = cls._synthesize_from_context(user_message, filtered_chunks)
+
+        # Enforce no repeated greetings on ongoing conversation turns
+        if reply and not is_first_turn and not is_user_greeting:
+            reply = cls._clean_followup_greeting(reply)
 
         # Record this completed turn into LangChain conversational memory
         history_mgr.append_turn(session_id, user_message, reply)
@@ -494,12 +520,62 @@ class GeminiService:
         )
 
     @classmethod
+    def _clean_followup_greeting(cls, text: str) -> str:
+        """
+        Strips leading greeting pleasantries and assistant persona re-introductions
+        from follow-up turns in an ongoing conversation.
+        Ensures verified college factual content is never stripped or damaged.
+        """
+        if not text:
+            return text
+
+        current = text.strip()
+
+        # Repeatedly strip greetings, persona preambles, and conversational intros from the beginning
+        for _ in range(4):
+            prev = current
+
+            # 1. Clean bold or plain standalone greeting words at start:
+            # e.g., "**Hello!**", "Hello!", "Hello there!", "Hi!", "Hey!", "Greetings!", "Welcome to BMSIT&M!"
+            current = re.sub(
+                r'^\s*(?:\*\*)?(?:hello|hi|hey|greetings|welcome(?:\s+to\s+bmsit(?:&m)?)?|good\s+(?:morning|afternoon|evening|day))(?:\s+(?:there|everyone|again))?[!,.]*(?:\*\*)?[!,.:\-–\s]*',
+                '',
+                current,
+                flags=re.IGNORECASE
+            )
+
+            # 2. Clean persona / pleasantry sentences at start:
+            # e.g., "As the official AI assistant of BMSIT&M, I can help you with that."
+            # "I am the official AI assistant for BMSIT."
+            # "I would be happy to help you with that."
+            current = re.sub(
+                r'^\s*(?:as\s+(?:the\s+)?(?:official\s+)?(?:bmsit(?:\s*&?\s*m)?\s+)?ai\s+assistant[^.!\n]*?[.!\n]+|'
+                r'i(?:\s*am|\'m)\s+(?:the\s+)?(?:official\s+)?(?:bmsit(?:\s*&?\s*m)?\s+)?ai\s+assistant[^.!\n]*?[.!\n]+|'
+                r'i(?:\s*am|\'m|\s*would\s+be|\'d\s+be)?\s+(?:happy|glad|here)\s+to\s+(?:help|assist|provide)[^.!\n]*?[.!\n]+)\s*',
+                '',
+                current,
+                flags=re.IGNORECASE
+            )
+
+            if current == prev or not current.strip():
+                break
+
+        current = current.strip()
+
+        # If first character is lowercase after strip, uppercase it for clean presentation
+        if current and current[0].islower():
+            current = current[0].upper() + current[1:]
+
+        return current if current else text.strip()
+
+    @classmethod
     def _call_gemini_api(
         cls,
         api_keys: Any,
         query: str,
         context: str,
-        history_block: str = ""
+        history_block: str = "",
+        is_first_turn: bool = True
     ) -> str:
         """
         Calls Google Gemini API strictly powered by gemini-3.5-flash-lite with multi-key rotation.
@@ -510,13 +586,27 @@ class GeminiService:
         if not keys_list:
             raise RuntimeError("No Gemini API keys configured.")
 
+        if is_first_turn:
+            answer_guideline = (
+                "Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. "
+                "If you include an opening greeting or welcome, keep it strictly to 1 line. "
+                "HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**."
+            )
+        else:
+            answer_guideline = (
+                "CRITICAL CONVERSATION RULE: This is an ongoing conversation (not the first chat). "
+                "DO NOT include any greeting (NO 'Hello', 'Hi', 'Greetings', 'Welcome to BMSIT', etc.) or introductory pleasantries. "
+                "Start IMMEDIATELY with the direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. "
+                "HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**."
+            )
+
         user_prompt = f"""KNOWLEDGE BASE CONTEXT (From BMSIT official website and verified college records via FAISS index):
 {context}
 
 USER QUESTION:
 {query}
 
-ANSWER (Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. If greeting or concluding, keep greeting and conclusion strictly within 3 lines maximum. HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**):"""
+ANSWER ({answer_guideline}):"""
 
         session = cls._get_session()
         timeout_sec = float(getattr(Config, "CHAT_TIMEOUT", 45) or 45)

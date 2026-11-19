@@ -128,7 +128,7 @@ class LangChainHistoryManager:
 
             messages: List[BaseMessage] = []
 
-            if client_history and isinstance(client_history, list):
+            if client_history is not None and isinstance(client_history, list):
                 # Reconstruct LangChain message objects from client payload
                 for turn in client_history:
                     if not isinstance(turn, dict):
