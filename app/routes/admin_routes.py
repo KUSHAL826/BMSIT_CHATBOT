@@ -131,134 +131,102 @@ def _set_env_var(name, value):
 def _supabase_headers():
     """
     Headers used for server-side access to Supabase.
-
-    Uses the same SUPABASE_KEY already used by the application's
-    Supabase vector storage service.
+    Uses Config.SUPABASE_KEY which supports SUPABASE_KEY, SUPABASE_SERVICE_ROLE_KEY, etc.
     """
-
     key = (
-        os.getenv("SUPABASE_KEY")
-        or getattr(
-            Config,
-            "SUPABASE_KEY",
-            ""
-        )
+        getattr(Config, "SUPABASE_KEY", "")
+        or os.getenv("SUPABASE_KEY")
+        or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+        or os.getenv("SUPABASE_SECRET_KEY")
+        or os.getenv("SUPABASE_ANON_KEY")
+        or ""
     )
-
     return {
         "apikey": key,
         "Authorization": f"Bearer {key}",
         "Content-Type": "application/json",
         "Accept": "application/json",
+        "Prefer": "return=representation",
     }
 
 
 def _load_supabase_vectors_for_admin():
     """
-    Reads persistent vector metadata from Supabase.
-
-    This is intentionally separate from the existing RAG/FAISS code.
-
-    It is used by the Admin dashboard to restore knowledge information
-    after a Render restart/redeploy.
-
-    Returns:
-        list[dict]
+    Reads persistent vector metadata from RAG active index, Supabase, or local chunks.
+    Ensures document and website knowledge survive Render restarts and container redeployments.
     """
-
+    # 1. Primary: Check in-memory RAG active chunks (already loaded on startup)
     try:
+        rag = RAGService.get_instance()
+        with rag._lock:
+            if rag._chunks and len(rag._chunks) > 0:
+                return [dict(c) for c in rag._chunks]
+    except Exception as e:
+        print(f"[Admin] RAG chunks read notice: {e}")
 
+    # 2. Secondary: Load directly from SupabaseService if enabled
+    try:
+        from app.services.supabase_service import SupabaseService
+        supabase = SupabaseService.get_instance()
+        if supabase.is_enabled:
+            chunks, _ = supabase.fetch_all_chunks()
+            if chunks:
+                return chunks
+    except Exception as e:
+        print(f"[Admin] Supabase fetch_all_chunks error: {e}")
+
+    # 3. Tertiary: Local chunks file (data/faiss_index/bmsit_chunks.json)
+    try:
+        from app.services.fsutil import read_json
+        chunks_file = getattr(Config, "CHUNKS_FILE", Config.FAISS_DIR / "bmsit_chunks.json")
+        if chunks_file.exists():
+            local_chunks = read_json(chunks_file, default=[])
+            if isinstance(local_chunks, list) and local_chunks:
+                return local_chunks
+    except Exception as e:
+        print(f"[Admin] Local chunks file read notice: {e}")
+
+    # 4. Direct REST fallback if Supabase credentials exist
+    try:
         url = (
-            os.getenv("SUPABASE_URL")
-            or getattr(
-                Config,
-                "SUPABASE_URL",
-                ""
-            )
+            getattr(Config, "SUPABASE_URL", "")
+            or os.getenv("SUPABASE_URL")
+            or ""
         ).rstrip("/")
-
         table = (
-            os.getenv("SUPABASE_TABLE")
-            or getattr(
-                Config,
-                "SUPABASE_TABLE",
-                ""
-            )
+            getattr(Config, "SUPABASE_TABLE", "")
+            or os.getenv("SUPABASE_TABLE")
             or "vectors"
         )
-
         key = (
-            os.getenv("SUPABASE_KEY")
-            or getattr(
-                Config,
-                "SUPABASE_KEY",
-                ""
-            )
+            getattr(Config, "SUPABASE_KEY", "")
+            or os.getenv("SUPABASE_KEY")
+            or os.getenv("SUPABASE_SERVICE_ROLE_KEY")
+            or ""
         )
 
         if not url or not key:
-
-            print(
-                "[Admin] Supabase credentials unavailable "
-                "for persistent knowledge."
-            )
-
             return []
 
-        endpoint = (
-            f"{url}/rest/v1/{table}"
-        )
-
+        endpoint = f"{url}/rest/v1/{table}"
         params = {
-            "select": (
-                "id,"
-                "source_id,"
-                "source_name,"
-                "source_type,"
-                "item_key,"
-                "text,"
-                "metadata"
-            ),
-            "order": "id.desc",
-            "limit": "10000",
+            "select": "id,source_id,source_name,source_type,item_key,text,metadata",
+            "limit": "1000",
         }
-
         response = requests.get(
             endpoint,
             headers=_supabase_headers(),
             params=params,
-            timeout=30
+            timeout=15
         )
-
-        if response.status_code >= 400:
-
-            print(
-                "[Admin] Supabase persistent "
-                "knowledge read failed: "
-                f"HTTP {response.status_code}: "
-                f"{response.text[:500]}"
-            )
-
-            return []
-
-        data = response.json()
-
-        if not isinstance(
-            data,
-            list
-        ):
-            return []
-
-        return data
-
+        if response.status_code < 400:
+            data = response.json()
+            if isinstance(data, list):
+                return data
     except Exception as e:
+        print(f"[Admin] Supabase direct fallback read error: {e}")
 
-        print(
-            "[Admin] Could not load persistent "
-            f"Supabase vectors: {e}"
-        )
-
-        return []
+    return []
 
 
 # ============================================================
@@ -616,31 +584,39 @@ def _get_persistent_document_knowledge():
     """
     Retrieves all uploaded institutional document entries (PDF, DOCX, DOC, CSV).
     Extracts every document uploaded by administrators from local history,
-    KnowledgeStore sources, physical uploads directory, and Supabase vectors.
+    KnowledgeStore sources, RAG active chunks, persistent Supabase vectors,
+    and physical uploads directory.
+    
+    Ensures uploaded documents NEVER disappear after Render redeploys,
+    inactivity spin-downs, or server restarts.
     """
     seen_ids = set()
     documents = []
 
-    # 1. Local history entries
+    # 1. Local history entries (data/history.json)
     try:
         local_history = StorageService.load_history() or []
         for h in local_history:
             if h.get("source_type") != "website" and h.get("id") != KnowledgeStore.WEBSITE_SOURCE_ID:
-                doc_id = str(h.get("id") or h.get("source") or "").strip().lower()
-                if doc_id and doc_id not in seen_ids:
-                    seen_ids.add(doc_id)
+                doc_id = str(h.get("id") or "").strip().lower()
+                doc_name = str(h.get("source") or "").strip().lower()
+                if doc_id or doc_name:
+                    if doc_id:
+                        seen_ids.add(doc_id)
+                    if doc_name:
+                        seen_ids.add(doc_name)
                     documents.append(h)
     except Exception as e:
         print(f"[Admin] Local history document read error: {e}")
 
-    # 2. Local KnowledgeStore documents
+    # 2. Local KnowledgeStore documents (data/knowledge/)
     try:
         sources = KnowledgeStore.list_sources() or []
         for rec in sources:
             if rec.get("source_type") == "document":
                 sid = str(rec.get("source_id") or "").strip().lower()
                 sname = str(rec.get("source_name") or sid).strip().lower()
-                if sid and sid not in seen_ids and sname not in seen_ids:
+                if sid not in seen_ids and sname not in seen_ids:
                     seen_ids.add(sid)
                     seen_ids.add(sname)
                     ext = sname.rsplit(".", 1)[-1].lower() if "." in sname else "document"
@@ -659,18 +635,102 @@ def _get_persistent_document_knowledge():
     except Exception as e:
         print(f"[Admin] KnowledgeStore document read error: {e}")
 
-    # 3. Persistent Supabase documents (for Render redeployments)
+    # 3. Active RAG Chunks (in memory / bmsit_chunks.json) - survives container spin-downs!
+    try:
+        rag = RAGService.get_instance()
+        with rag._lock:
+            doc_chunks_grouped = {}
+            for chunk in (rag._chunks or []):
+                st = str(chunk.get("source_type") or "").lower()
+                sid = str(chunk.get("source_id") or "")
+                sname = str(chunk.get("source_name") or sid or "")
+                if st in ("document", "file", "upload") or (sid.startswith("doc-") and sid != KnowledgeStore.WEBSITE_SOURCE_ID):
+                    target_id = sid or sname
+                    if target_id not in doc_chunks_grouped:
+                        ext = sname.rsplit(".", 1)[-1].lower() if "." in sname else "document"
+                        doc_chunks_grouped[target_id] = {
+                            "id": sid or f"doc-{hashlib.md5(sname.encode()).hexdigest()[:10]}",
+                            "source": sname or sid,
+                            "source_type": "document",
+                            "file_type": ext,
+                            "status": "Indexed",
+                            "chunk_count": 0,
+                            "chars": 0,
+                            "date": chunk.get("updated_at") or chunk.get("created_at") or now_ist_str(),
+                            "changes": "Active in Knowledge Base",
+                            "details": {"chunks": []}
+                        }
+                    doc_chunks_grouped[target_id]["chunk_count"] += 1
+                    doc_chunks_grouped[target_id]["chars"] += len(chunk.get("text", "") or "")
+                    if len(doc_chunks_grouped[target_id]["details"]["chunks"]) < 15:
+                        doc_chunks_grouped[target_id]["details"]["chunks"].append(chunk)
+
+            for target_id, doc_entry in doc_chunks_grouped.items():
+                sid_norm = str(doc_entry.get("id", "")).strip().lower()
+                sname_norm = str(doc_entry.get("source", "")).strip().lower()
+                if sid_norm not in seen_ids and sname_norm not in seen_ids:
+                    seen_ids.add(sid_norm)
+                    seen_ids.add(sname_norm)
+                    doc_entry["changes"] = f"{doc_entry['chunk_count']} vector chunk(s) active"
+                    documents.append(doc_entry)
+    except Exception as e:
+        print(f"[Admin] RAG document chunks read error: {e}")
+
+    # 4. Persistent Supabase documents (for Render redeployments)
     try:
         supabase_history = _build_supabase_history() or []
         for item in supabase_history:
             if item.get("source_type") != "website" and item.get("id") != KnowledgeStore.WEBSITE_SOURCE_ID:
                 key = str(item.get("source") or item.get("id") or "").strip().lower()
-                if key and key not in seen_ids:
+                sid_key = str(item.get("id", "")).strip().lower()
+                if key not in seen_ids and sid_key not in seen_ids:
                     seen_ids.add(key)
-                    seen_ids.add(str(item.get("id", "")).strip().lower())
+                    seen_ids.add(sid_key)
                     documents.append(item)
     except Exception as e:
         print(f"[Admin] Supabase document read error: {e}")
+
+    # 5. Physical uploads directory (data/uploads)
+    try:
+        uploads_dir = Config.UPLOADS_DIR
+        if uploads_dir.exists():
+            for f in uploads_dir.iterdir():
+                if f.is_file() and not f.name.startswith("."):
+                    fname = f.name
+                    fname_norm = fname.strip().lower()
+                    if fname_norm not in seen_ids:
+                        seen_ids.add(fname_norm)
+                        ext = fname.rsplit(".", 1)[-1].lower() if "." in fname else "document"
+                        documents.append({
+                            "id": KnowledgeStore.document_source_id(fname),
+                            "source": fname,
+                            "source_type": "document",
+                            "file_type": ext,
+                            "status": "Indexed",
+                            "chunk_count": 1,
+                            "changes": f"Physical upload ({f.stat().st_size:,} bytes)",
+                            "date": now_ist_str(),
+                            "details": {"file_size": f.stat().st_size}
+                        })
+    except Exception as e:
+        print(f"[Admin] Physical uploads read error: {e}")
+
+    # 6. Auto-Repair / Self-Healing: Re-persist recovered documents into history.json and KnowledgeStore
+    try:
+        curr_history = StorageService.load_history() or []
+        existing_ids = {str(h.get("id", "")).strip().lower() for h in curr_history}
+        existing_sources = {str(h.get("source", "")).strip().lower() for h in curr_history}
+        missing_to_save = []
+        for doc in documents:
+            did = str(doc.get("id", "")).strip().lower()
+            dsource = str(doc.get("source", "")).strip().lower()
+            if did not in existing_ids and dsource not in existing_sources:
+                missing_to_save.append(doc)
+        if missing_to_save:
+            StorageService.save_history(missing_to_save + curr_history)
+            print(f"[Admin] Self-healed history.json with {len(missing_to_save)} persistent document(s).")
+    except Exception as e:
+        print(f"[Admin] Self-heal history error: {e}")
 
     # Sort documents by date / upload time descending
     documents.sort(key=lambda d: str(d.get("date", "")), reverse=True)
@@ -849,6 +909,8 @@ def admin_dashboard():
         SchedulerService.get_status()
     )
 
+    supabase_enabled = Config.is_supabase_enabled()
+
     return render_template(
         "admin.html",
 
@@ -865,7 +927,8 @@ def admin_dashboard():
 
         rag_stats=rag_stats,
 
-        sched_status=sched_status
+        sched_status=sched_status,
+        supabase_enabled=supabase_enabled
     )
 
 
