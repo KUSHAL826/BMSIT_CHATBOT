@@ -112,8 +112,8 @@ def run_website_delta_ingestion(is_scheduled=False):
     try:
         scraper = WebsiteScraper(
             base_url=target_url,
-            max_pages=settings.get("scrape_max_pages", Config.SCRAPE_MAX_PAGES),
-            max_depth=settings.get("scrape_depth", Config.SCRAPE_DEPTH),
+            max_pages=int(os.getenv("SCRAPE_MAX_PAGES") or Config.SCRAPE_MAX_PAGES),
+            max_depth=int(os.getenv("SCRAPE_DEPTH") or Config.SCRAPE_DEPTH),
         )
         crawl = scraper.run_sync(keep_running_for_indexing=True)
 
@@ -122,10 +122,10 @@ def run_website_delta_ingestion(is_scheduled=False):
 
         pages = crawl.get("scraped_pages", {})
         scraper_status.phase = "comparing"
-        scraper_status.status_message = f"Hashing {len(pages)} page(s) against the registry..."
+        scraper_status.status_message = f"Checking {len(pages)} page(s) for content updates..."
 
         # ---------------- change detection ----------------
-        # Pages too thin to answer anything are not worth embedding tokens on.
+        # Check content changes against previous crawl to only embed new/modified pages
         hashes, thin_pages = {}, []
         for url, page in pages.items():
             text = (page.get("content") or "").strip()
@@ -211,7 +211,7 @@ def run_website_delta_ingestion(is_scheduled=False):
         # ---------------- chunk only what changed ----------------
         scraper_status.phase = "chunking"
         scraper_status.status_message = (
-            f"{len(changed)} page(s) changed, {len(unchanged)} unchanged. Chunking..."
+            f"{len(changed)} page(s) new/updated, {len(unchanged)} unchanged. Preparing chunks..."
         )
 
         stored = KnowledgeStore.get_items(source_id)
@@ -223,8 +223,6 @@ def run_website_delta_ingestion(is_scheduled=False):
             meta = item.get("metadata") or {}
             title = item.get("title") or url
             now_ts = StorageService._now_ist_str()
-            doc_type = meta.get("type") or "web"
-            is_doc = meta.get("is_document", False)
             chunks_by_url[url] = rag.chunk_text(
                 text=item["text"],
                 source_id=source_id,
@@ -233,8 +231,8 @@ def run_website_delta_ingestion(is_scheduled=False):
                 metadata_extra={
                     "url": meta.get("url", url),
                     "title": title,
-                    "type": doc_type,
-                    "is_document": is_doc,
+                    "type": "web",
+                    "is_document": False,
                     "updated_at": now_ts,
                     "created_at": meta.get("created_at") or now_ts,
                 },
@@ -264,7 +262,7 @@ def run_website_delta_ingestion(is_scheduled=False):
             scraper_status.phase = "embedding"
             scraper_status.status_message = (
                 f"Embedding batch {slice_index}/{len(planned)}: "
-                f"{len(slice_chunks)} chunk(s) from {len(slice_urls)} page(s)..."
+                f"storing {len(slice_chunks)} chunk(s) from {len(slice_urls)} page(s) into Supabase vector database..."
             )
 
             try:

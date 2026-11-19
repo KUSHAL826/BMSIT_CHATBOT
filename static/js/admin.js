@@ -6,7 +6,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initDeleteHandlers();
   initDocumentViewerModal();
   initSettingsModal();
-  initWebsiteCategoryDropdowns();
+  initWebsitePagination();
   pollStatusIfRunning();
 });
 
@@ -581,158 +581,210 @@ function initDocumentViewerModal() {
 }
 
 // -------------------------------------------------------------
-// Website Scraping Category Drop Down Menus & Accordion Filters
+// Website Scraping Direct Table Pagination (10 chunks/page)
 // -------------------------------------------------------------
-function initWebsiteCategoryDropdowns() {
-  const catSelect = document.getElementById("category-dropdown-select");
-  const viewSelect = document.getElementById("view-mode-select");
+function initWebsitePagination() {
+  const tbody = document.getElementById("website-flat-tbody");
+  const paginationContainer = document.getElementById("website-pagination-container");
+  const buttonsWrap = document.getElementById("pagination-buttons-wrap");
+  const pagStart = document.getElementById("pag-start");
+  const pagEnd = document.getElementById("pag-end");
+  const pagTotal = document.getElementById("pag-total");
   const searchInput = document.getElementById("website-search-input");
   const clearSearchBtn = document.getElementById("btn-clear-search");
-  const btnExpandAll = document.getElementById("btn-expand-all");
-  const btnCollapseAll = document.getElementById("btn-collapse-all");
-  const accordionContainer = document.getElementById("website-accordion-container");
-  const flatContainer = document.getElementById("website-flat-table-container");
-  const accordionActionGroup = document.getElementById("accordion-action-buttons");
 
-  if (!catSelect && !accordionContainer) return;
+  if (!tbody) return;
 
-  // 1. Accordion Header Toggle (Click to expand / collapse)
-  document.querySelectorAll(".category-accordion-header").forEach(header => {
-    header.addEventListener("click", () => {
-      const card = header.closest(".category-accordion-card");
-      if (card) {
-        card.classList.toggle("is-collapsed");
-        const isCollapsed = card.classList.contains("is-collapsed");
-        header.setAttribute("aria-expanded", !isCollapsed);
+  const allRows = Array.from(tbody.querySelectorAll("tr.website-item-row"));
+  if (allRows.length === 0) {
+    if (paginationContainer) paginationContainer.style.display = "none";
+    return;
+  }
+
+  const PAGE_SIZE = 10;
+  let currentPage = 1;
+  let filteredRows = [...allRows];
+
+  function filterRows() {
+    const query = searchInput ? searchInput.value.trim().toLowerCase() : "";
+    if (clearSearchBtn) {
+      clearSearchBtn.style.display = query ? "block" : "none";
+    }
+
+    if (!query) {
+      filteredRows = [...allRows];
+    } else {
+      filteredRows = allRows.filter(row => {
+        const title = row.getAttribute("data-title") || "";
+        const url = row.getAttribute("data-url") || "";
+        return title.includes(query) || url.includes(query);
+      });
+    }
+
+    currentPage = 1;
+    render();
+  }
+
+  function getPaginationRange(current, total) {
+    if (total <= 7) {
+      return Array.from({ length: total }, (_, i) => i + 1);
+    }
+    const delta = 1;
+    const range = [];
+    const rangeWithDots = [];
+    let l;
+
+    for (let i = 1; i <= total; i++) {
+      if (i === 1 || i === total || (i >= current - delta && i <= current + delta)) {
+        range.push(i);
       }
-    });
-  });
+    }
 
-  // 2. Expand All & Collapse All
-  if (btnExpandAll) {
-    btnExpandAll.addEventListener("click", () => {
-      document.querySelectorAll(".category-accordion-card").forEach(c => {
-        c.classList.remove("is-collapsed");
-        const h = c.querySelector(".category-accordion-header");
-        if (h) h.setAttribute("aria-expanded", "true");
-      });
-    });
+    for (const i of range) {
+      if (l) {
+        if (i - l === 2) {
+          rangeWithDots.push(l + 1);
+        } else if (i - l !== 1) {
+          rangeWithDots.push("...");
+        }
+      }
+      rangeWithDots.push(i);
+      l = i;
+    }
+    return rangeWithDots;
   }
 
-  if (btnCollapseAll) {
-    btnCollapseAll.addEventListener("click", () => {
-      document.querySelectorAll(".category-accordion-card").forEach(c => {
-        c.classList.add("is-collapsed");
-        const h = c.querySelector(".category-accordion-header");
-        if (h) h.setAttribute("aria-expanded", "false");
-      });
-    });
-  }
+  function render() {
+    const totalEntries = filteredRows.length;
+    const totalPages = Math.max(1, Math.ceil(totalEntries / PAGE_SIZE));
 
-  // 3. View Mode Toggle (Accordion vs Flat Table)
-  if (viewSelect) {
-    viewSelect.addEventListener("change", () => {
-      const mode = viewSelect.value;
-      if (mode === "flat") {
-        if (accordionContainer) accordionContainer.style.display = "none";
-        if (flatContainer) flatContainer.style.display = "block";
-        if (accordionActionGroup) accordionActionGroup.style.display = "none";
+    if (currentPage > totalPages) currentPage = totalPages;
+    if (currentPage < 1) currentPage = 1;
+
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    const endIndex = Math.min(startIndex + PAGE_SIZE, totalEntries);
+
+    // Hide all rows first
+    allRows.forEach(row => {
+      row.style.display = "none";
+    });
+
+    // Handle empty results state
+    let noResultsRow = document.getElementById("no-matching-website-pages");
+    if (totalEntries === 0) {
+      if (!noResultsRow) {
+        noResultsRow = document.createElement("tr");
+        noResultsRow.id = "no-matching-website-pages";
+        noResultsRow.innerHTML = `<td colspan="6" style="text-align: center; color: #94a3b8; padding: 36px 16px;">
+          🔍 No pages match your search query. <button type="button" id="btn-reset-search-link" style="background:none; border:none; color:#38bdf8; text-decoration:underline; cursor:pointer;">Clear search</button>
+        </td>`;
+        tbody.appendChild(noResultsRow);
+        const resetBtn = document.getElementById("btn-reset-search-link");
+        if (resetBtn) {
+          resetBtn.addEventListener("click", () => {
+            if (searchInput) searchInput.value = "";
+            filterRows();
+          });
+        }
       } else {
-        if (accordionContainer) accordionContainer.style.display = "flex";
-        if (flatContainer) flatContainer.style.display = "none";
-        if (accordionActionGroup) accordionActionGroup.style.display = "flex";
+        noResultsRow.style.display = "";
       }
-      applyFilters();
-    });
+    } else {
+      if (noResultsRow) {
+        noResultsRow.style.display = "none";
+      }
+      // Show rows for current page
+      for (let i = startIndex; i < endIndex; i++) {
+        filteredRows[i].style.display = "";
+      }
+    }
+
+    // Update Showing X to Y of Z entries
+    if (pagStart) pagStart.textContent = totalEntries > 0 ? (startIndex + 1) : 0;
+    if (pagEnd) pagEnd.textContent = endIndex;
+    if (pagTotal) pagTotal.textContent = totalEntries;
+
+    // Render pagination buttons
+    if (buttonsWrap) {
+      buttonsWrap.innerHTML = "";
+
+      if (totalPages <= 1) {
+        if (paginationContainer) {
+          paginationContainer.style.display = totalEntries === 0 ? "none" : "flex";
+        }
+        return;
+      }
+
+      if (paginationContainer) {
+        paginationContainer.style.display = "flex";
+      }
+
+      // Prev Button
+      const prevBtn = document.createElement("button");
+      prevBtn.type = "button";
+      prevBtn.className = "pag-btn pag-prev";
+      prevBtn.innerHTML = "◀ Prev";
+      prevBtn.disabled = (currentPage === 1);
+      prevBtn.addEventListener("click", () => {
+        if (currentPage > 1) {
+          currentPage--;
+          render();
+        }
+      });
+      buttonsWrap.appendChild(prevBtn);
+
+      // Numbered Page Buttons with intelligent ellipsis
+      const pageNumbers = getPaginationRange(currentPage, totalPages);
+      pageNumbers.forEach(p => {
+        if (p === "...") {
+          const ellipsis = document.createElement("span");
+          ellipsis.className = "pag-ellipsis";
+          ellipsis.textContent = "…";
+          buttonsWrap.appendChild(ellipsis);
+        } else {
+          const pageBtn = document.createElement("button");
+          pageBtn.type = "button";
+          pageBtn.className = `pag-btn ${p === currentPage ? "active" : ""}`;
+          pageBtn.textContent = p;
+          pageBtn.addEventListener("click", () => {
+            currentPage = p;
+            render();
+          });
+          buttonsWrap.appendChild(pageBtn);
+        }
+      });
+
+      // Next Button
+      const nextBtn = document.createElement("button");
+      nextBtn.type = "button";
+      nextBtn.className = "pag-btn pag-next";
+      nextBtn.innerHTML = "Next ▶";
+      nextBtn.disabled = (currentPage === totalPages);
+      nextBtn.addEventListener("click", () => {
+        if (currentPage < totalPages) {
+          currentPage++;
+          render();
+        }
+      });
+      buttonsWrap.appendChild(nextBtn);
+    }
   }
 
-  // 4. Category Dropdown Filter
-  if (catSelect) {
-    catSelect.addEventListener("change", () => {
-      applyFilters();
-    });
-  }
-
-  // 5. Search Box Filter
+  // Event Listeners
   if (searchInput) {
-    searchInput.addEventListener("input", () => {
-      if (clearSearchBtn) {
-        clearSearchBtn.style.display = searchInput.value.trim() ? "block" : "none";
-      }
-      applyFilters();
-    });
+    searchInput.addEventListener("input", filterRows);
   }
 
   if (clearSearchBtn) {
     clearSearchBtn.addEventListener("click", () => {
       searchInput.value = "";
       clearSearchBtn.style.display = "none";
-      applyFilters();
+      filterRows();
       searchInput.focus();
     });
   }
 
-  // Master Filter Function combining Category and Search Query
-  function applyFilters() {
-    const selectedCat = catSelect ? catSelect.value : "all";
-    const query = searchInput ? searchInput.value.trim().toLowerCase() : "";
-
-    // A. Filter Accordion View
-    const accordionCards = document.querySelectorAll(".category-accordion-card");
-    accordionCards.forEach(card => {
-      const cardCat = card.getAttribute("data-category");
-      const matchesCat = (selectedCat === "all" || cardCat === selectedCat);
-
-      if (!matchesCat) {
-        card.style.display = "none";
-        return;
-      }
-
-      // Filter rows inside this category card if search query exists
-      const rows = card.querySelectorAll("tbody tr.cat-page-row");
-      let visibleRowCount = 0;
-
-      rows.forEach(row => {
-        const title = row.getAttribute("data-title") || "";
-        const url = row.getAttribute("data-url") || "";
-        const matchesQuery = (!query || title.includes(query) || url.includes(query));
-
-        if (matchesQuery) {
-          row.style.display = "";
-          visibleRowCount++;
-        } else {
-          row.style.display = "none";
-        }
-      });
-
-      // Show card if it has visible rows or if query is empty
-      if (query && visibleRowCount === 0) {
-        card.style.display = "none";
-      } else {
-        card.style.display = "";
-        // If a specific category was selected or search query active, auto-expand
-        if (selectedCat !== "all" || query) {
-          card.classList.remove("is-collapsed");
-        }
-      }
-    });
-
-    // B. Filter Flat Table View
-    const flatRows = document.querySelectorAll("#website-flat-tbody tr.flat-page-row");
-    flatRows.forEach(row => {
-      const rowCat = row.getAttribute("data-category");
-      const title = row.getAttribute("data-title") || "";
-      const url = row.getAttribute("data-url") || "";
-
-      const matchesCat = (selectedCat === "all" || rowCat === selectedCat);
-      const matchesQuery = (!query || title.includes(query) || url.includes(query));
-
-      if (matchesCat && matchesQuery) {
-        row.style.display = "";
-      } else {
-        row.style.display = "none";
-      }
-    });
-  }
+  // Initial render
+  render();
 }
 
