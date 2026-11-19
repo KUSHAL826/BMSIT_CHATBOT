@@ -19,6 +19,7 @@ swap always happens after successful embedding, so a failed run cannot empty the
 knowledge base.
 """
 import logging
+import os
 import time
 
 from app.config import Config
