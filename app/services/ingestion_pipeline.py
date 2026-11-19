@@ -159,6 +159,20 @@ def run_website_delta_ingestion(is_scheduled=False):
                 changed.append(url)
         unchanged = still_unchanged
 
+        # Additional protection: If content is already present in stored knowledge
+        # and has matching vectors with identical content, DO NOT re-embed!
+        stored_items = KnowledgeStore.get_items(source_id)
+        final_changed = []
+        for url in changed:
+            if url in indexed_keys and url in stored_items:
+                prev_text = (stored_items[url].get("text") or "").strip()
+                if prev_text and content_hash(prev_text) == hashes.get(url):
+                    unchanged.append(url)
+                    reasons[url] = "already-indexed-unchanged"
+                    continue
+            final_changed.append(url)
+        changed = final_changed
+
         reason_counts = {}
         for url in changed:
             reason_counts[reasons.get(url, "unknown")] = reason_counts.get(
@@ -179,7 +193,12 @@ def run_website_delta_ingestion(is_scheduled=False):
                 url: {
                     "title": page["title"],
                     "text": page["content"],
-                    "metadata": {"url": url, "title": page["title"], "type": "web"},
+                    "metadata": {
+                        "url": url,
+                        "title": page["title"],
+                        "type": page.get("file_type") or "web",
+                        "is_document": page.get("is_document", False)
+                    },
                 }
                 for url, page in pages.items()
             },
@@ -204,6 +223,8 @@ def run_website_delta_ingestion(is_scheduled=False):
             meta = item.get("metadata") or {}
             title = item.get("title") or url
             now_ts = StorageService._now_ist_str()
+            doc_type = meta.get("type") or "web"
+            is_doc = meta.get("is_document", False)
             chunks_by_url[url] = rag.chunk_text(
                 text=item["text"],
                 source_id=source_id,
@@ -212,12 +233,13 @@ def run_website_delta_ingestion(is_scheduled=False):
                 metadata_extra={
                     "url": meta.get("url", url),
                     "title": title,
-                    "type": "web",
+                    "type": doc_type,
+                    "is_document": is_doc,
                     "updated_at": now_ts,
                     "created_at": meta.get("created_at") or now_ts,
                 },
                 item_key=url,
-                context_header=f"BMSIT page: {title} ({meta.get('url', url)})",
+                context_header=f"BMSIT: {title} ({meta.get('url', url)})",
             )
 
         # ---------------- embed in committed slices ----------------

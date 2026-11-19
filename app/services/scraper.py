@@ -1,9 +1,13 @@
 import hashlib
+import io
 import json
 import logging
+import os
 import re
+import tempfile
 import threading
 import time
+from pathlib import Path
 from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
@@ -40,6 +44,23 @@ class ScraperStatus:
 scraper_status = ScraperStatus()
 
 class WebsiteScraper:
+    MEDIA_EXTENSIONS = (
+        ".jpg", ".jpeg", ".png", ".gif", ".svg", ".webp", ".ico", ".bmp",
+        ".mp4", ".mp3", ".wav", ".avi", ".mov", ".mkv",
+        ".zip", ".rar", ".tar", ".gz", ".7z",
+        ".exe", ".dmg", ".apk", ".msi",
+        ".css", ".js", ".map", ".woff", ".woff2", ".ttf", ".eot"
+    )
+
+    DOC_EXTENSIONS = {
+        ".pdf": "pdf",
+        ".docx": "docx",
+        ".doc": "doc",
+        ".csv": "csv",
+        ".tsv": "csv",
+        ".txt": "txt"
+    }
+
     def __init__(self, base_url=None, max_pages=None, max_depth=None):
         settings = StorageService.load_settings()
         self.base_url = base_url or settings.get("bmsit_url", Config.BMSIT_DEFAULT_URL)
@@ -47,16 +68,95 @@ class WebsiteScraper:
         self.max_depth = max_depth or settings.get("scrape_depth", Config.SCRAPE_DEPTH)
         
         parsed = urlparse(self.base_url)
-        self.domain = parsed.netloc
+        self.domain = parsed.netloc.lower()
+        self.apex_domain = self.domain.split(":")[0].removeprefix("www.")
+        
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 BMSIT-AI-Bot/1.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,application/pdf,*/*;q=0.8"
         })
+
+    def _is_allowed_domain(self, target_url: str) -> bool:
+        if not target_url:
+            return False
+        netloc = urlparse(target_url).netloc.lower().split(":")[0].removeprefix("www.")
+        if not netloc:
+            return True
+        return netloc == self.apex_domain or netloc.endswith("." + self.apex_domain)
+
+    # -------------------------------------------------------------
+    # Document Parsers (PDF, DOCX, DOC, CSV)
+    # -------------------------------------------------------------
+    def _parse_pdf_bytes(self, content_bytes, filename="document.pdf"):
+        try:
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(content_bytes))
+            pages_text = []
+            for idx, p in enumerate(reader.pages):
+                txt = (p.extract_text() or "").strip()
+                if txt:
+                    txt = re.sub(r'[ \t]+', ' ', txt)
+                    pages_text.append(f"[Page {idx + 1}]\n{txt}")
+            return "\n\n".join(pages_text).strip()
+        except Exception as e:
+            logger.warning("[Scraper] PDF parsing failed for %s: %s", filename, e)
+            return ""
+
+    def _parse_docx_bytes(self, content_bytes, filename="document.docx"):
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(content_bytes))
+            lines = []
+            for p in doc.paragraphs:
+                txt = p.text.strip()
+                if txt:
+                    lines.append(txt)
+            for table in doc.tables:
+                for row in table.rows:
+                    row_txt = " | ".join(c.text.strip() for c in row.cells if c.text.strip())
+                    if row_txt:
+                        lines.append(row_txt)
+            return "\n\n".join(lines).strip()
+        except Exception as e:
+            logger.warning("[Scraper] DOCX parsing failed for %s: %s", filename, e)
+            return ""
+
+    def _parse_doc_bytes(self, content_bytes, filename="document.doc"):
+        try:
+            from app.services.document_parser import DocumentParser
+            with tempfile.NamedTemporaryFile(suffix=".doc", delete=False) as tmp:
+                tmp.write(content_bytes)
+                tmp_path = Path(tmp.name)
+            try:
+                sections = DocumentParser._parse_doc(tmp_path)
+                return "\n\n".join(s["content"] for s in sections if s.get("content")).strip()
+            finally:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+        except Exception as e:
+            logger.warning("[Scraper] Legacy DOC parsing failed for %s: %s", filename, e)
+            return ""
+
+    def _parse_csv_bytes(self, content_bytes, filename="data.csv"):
+        try:
+            import csv
+            text = content_bytes.decode("utf-8", errors="replace")
+            reader = csv.reader(io.StringIO(text))
+            lines = []
+            for row in reader:
+                row_str = " | ".join(c.strip() for c in row if c.strip())
+                if row_str:
+                    lines.append(row_str)
+            return "\n".join(lines).strip()
+        except Exception as e:
+            logger.warning("[Scraper] CSV parsing failed for %s: %s", filename, e)
+            return ""
 
     def run_sync(self, keep_running_for_indexing=False):
         """
         Executes the scraping process synchronously and returns results.
+        Crawls web pages and linked documents (PDF, DOCX, DOC, CSV) recursively.
         Updates scraper_status throughout execution.
         """
         global scraper_status
@@ -67,12 +167,13 @@ class WebsiteScraper:
         scraper_status.status_message = f"Starting crawl of {self.base_url}"
         scraper_status.error = None
 
-        # Targeted BMSIT URLs with real content
+        # Comprehensive BMSIT seed paths across all institutional sections
         priority_paths = [
             "",
+            "/about-us.php",
+            "/governing-body.php",
             "/academic-council.php",
             "/administration.php",
-            "/governing-body.php",
             "/admissions.php",
             "/admission-query.php",
             "/fee-structure.php",
@@ -87,29 +188,43 @@ class WebsiteScraper:
             "/dep-electrical.php",
             "/dep-mechanical.php",
             "/dep-civil.php",
+            "/dep-ete.php",
+            "/dep-mca.php",
+            "/dep-mba.php",
+            "/dep-physics.php",
+            "/dep-chemistry.php",
+            "/dep-maths.php",
             "/scholarships.php",
             "/library-facilities.php",
             "/autonomous.php",
+            "/curriculum.php",
+            "/academic-calendar.php",
+            "/examinations.php",
+            "/results.php",
             "/iqac.php",
             "/nirf-new.php",
             "/aicte-idea-lab.php",
-            "/career.php"
+            "/career.php",
+            "/mandatory-disclosure.php"
         ]
         visited = set()
         queue = []
+        anchor_map = {}
+
         for p in priority_paths:
-            full_u = urljoin(self.base_url, p).rstrip("/")
-            if (full_u, 0) not in queue:
+            full_u = urljoin(self.base_url, p).split("#")[0].rstrip("/")
+            if full_u and not any(q[0] == full_u for q in queue):
                 queue.append((full_u, 0))
 
         # Load previous state for change detection and seed existing pages
         previous_state = StorageService.load_scrape_state()
         old_pages = previous_state.get("pages", {})
 
-        # Ensure previously scraped URLs stay in the queue in consistent order
+        # Ensure previously scraped URLs stay in the queue
         for old_u in old_pages:
-            if old_u and not any(q[0] == old_u for q in queue):
-                queue.append((old_u, 0))
+            clean_old = old_u.split("#")[0].rstrip("/")
+            if clean_old and not any(q[0] == clean_old for q in queue):
+                queue.append((clean_old, 0))
 
         queued_urls = set(q[0] for q in queue)
         scraped_pages = {}
@@ -125,15 +240,15 @@ class WebsiteScraper:
                     continue
                 
                 # Check domain boundary
-                u_domain = urlparse(url).netloc
-                if u_domain and u_domain != self.domain and not u_domain.endswith("." + self.domain):
+                if not self._is_allowed_domain(url):
                     continue
 
                 visited.add(url)
                 scraper_status.current_url = url
                 scraper_status.status_message = f"Scraping [{len(visited)}/{self.max_pages}]: {url}"
 
-                page_data = self._fetch_and_clean_page(url)
+                anchor = anchor_map.get(url)
+                page_data = self._fetch_and_clean_page(url, anchor_text=anchor)
                 if not page_data:
                     continue
 
@@ -141,51 +256,51 @@ class WebsiteScraper:
                 scraper_status.pages_scraped = len(scraped_pages)
 
                 # Discover new links dynamically if depth allows
-                if depth < self.max_depth and len(queue) < 1000:
-                    for link in page_data["links"]:
-                        clean_link = link.split("#")[0].rstrip("/")
+                if depth < self.max_depth and len(queue) < 10000:
+                    for link_item in page_data.get("links", []):
+                        if isinstance(link_item, tuple):
+                            link_url, link_anchor = link_item
+                        else:
+                            link_url, link_anchor = link_item, ""
+
+                        clean_link = link_url.split("#")[0].rstrip("/")
                         if clean_link and clean_link not in visited and clean_link not in queued_urls:
-                            # Only crawl same domain
-                            l_domain = urlparse(clean_link).netloc
-                            if l_domain == self.domain or not l_domain or l_domain.endswith("." + self.domain):
+                            if self._is_allowed_domain(clean_link):
                                 queue.append((clean_link, depth + 1))
                                 queued_urls.add(clean_link)
+                                if link_anchor and clean_link not in anchor_map:
+                                    anchor_map[clean_link] = link_anchor
 
                 # Polite delay
                 time.sleep(Config.SCRAPE_DELAY)
 
-            # Remove site chrome that repeats across pages (mega-menus, ticker
-            # links, carousels). Without this, the vast majority of indexed text
-            # is navigation noise and the assistant answers from menu labels
-            # instead of real page content.
+            # Remove site chrome that repeats across HTML pages (mega-menus, footers)
+            # Documents (PDF, DOCX) are exempt from boilerplate removal
             scraper_status.phase = "cleaning"
             scraper_status.status_message = f"Removing repeated navigation text from {len(scraped_pages)} pages..."
             removed_lines = self._strip_cross_page_boilerplate(scraped_pages)
             logger.info("[Scraper] Filtered %s repeated boilerplate line(s) site-wide.", removed_lines)
 
-            # Change detection runs on the CLEANED text, so a menu tweak on the
-            # website no longer marks every page as modified.
+            # Change detection runs on the CLEANED text
             for url, page_data in scraped_pages.items():
                 old_info = old_pages.get(url)
+                doc_suffix = f" ({page_data.get('file_type', 'doc').upper()} Document)" if page_data.get("is_document") else ""
                 if not old_info:
                     detected_changes.append({
                         "url": url,
                         "title": page_data["title"],
                         "change_type": "NEW",
-                        "summary": f"New page discovered ({len(page_data['content'])} characters)"
+                        "summary": f"New content discovered{doc_suffix} ({len(page_data['content'])} characters)"
                     })
                 elif old_info.get("hash") != page_data["hash"]:
                     detected_changes.append({
                         "url": url,
                         "title": page_data["title"],
                         "change_type": "MODIFIED",
-                        "summary": f"Content changed (diff size: {len(page_data['content']) - old_info.get('length', 0):+d} chars)"
+                        "summary": f"Content changed{doc_suffix} (diff size: {len(page_data['content']) - old_info.get('length', 0):+d} chars)"
                     })
 
-            # Pages known from earlier crawls that this run did not reach.
-            # They are reported but NOT treated as deletions: a crawl can stop
-            # early on the page cap, and stored knowledge is never discarded
-            # implicitly.
+            # Pages known from earlier crawls that this run did not reach
             for old_url, old_data in old_pages.items():
                 if old_url not in scraped_pages:
                     detected_changes.append({
@@ -195,14 +310,15 @@ class WebsiteScraper:
                         "summary": "Not reached in this crawl - previously stored content retained"
                     })
 
-            # Merge crawl state instead of overwriting it, so pages that were not
-            # revisited are not rediscovered as "NEW" on every single run.
+            # Merge crawl state instead of overwriting it
             merged_pages = dict(old_pages)
             for u, d in scraped_pages.items():
                 merged_pages[u] = {
                     "hash": d["hash"],
                     "title": d["title"],
                     "length": len(d["content"]),
+                    "is_document": d.get("is_document", False),
+                    "file_type": d.get("file_type", "web"),
                     "last_seen": StorageService._now_ist_str()
                 }
 
@@ -214,7 +330,7 @@ class WebsiteScraper:
             state["summary"] = changes_summary_text
             StorageService.save_scrape_state(state)
 
-            # Snapshot of raw crawled HTML text, merged with previous snapshots.
+            # Snapshot of raw crawled content, merged with previous snapshots
             scrape_batch_file = Config.SCRAPED_DIR / "bmsit_web_content.json"
             snapshot = read_json(scrape_batch_file, default={}) or {}
             if not isinstance(snapshot, dict):
@@ -230,7 +346,7 @@ class WebsiteScraper:
                 "scraped_pages": scraped_pages
             }
             scraper_status.last_result = result
-            scraper_status.status_message = f"Crawled {len(scraped_pages)} pages successfully."
+            scraper_status.status_message = f"Crawled {len(scraped_pages)} pages and documents successfully."
             return result
 
         except Exception as e:
@@ -248,22 +364,16 @@ class WebsiteScraper:
 
     def _strip_cross_page_boilerplate(self, scraped_pages):
         """
-        Drops lines that appear on a large share of the crawled pages.
-
-        A college site repeats its mega-menu, news ticker and footer on every
-        page. Those lines carry no page-specific meaning but dominate the index
-        by volume, so retrieval keeps surfacing menu labels. Any line seen on
-        more than ~22% of pages (and on at least 4 pages) is treated as chrome
-        and removed. Content hashes are recomputed from the cleaned text.
-
-        Returns the number of distinct lines filtered.
+        Drops lines that appear on a large share of the crawled HTML pages.
+        Documents (PDF, DOCX) are preserved without stripping.
         """
-        total_pages = len(scraped_pages)
+        html_pages = {k: v for k, v in scraped_pages.items() if not v.get("is_document")}
+        total_pages = len(html_pages)
         if total_pages < 4:
             return 0
 
         line_pages = {}
-        for page in scraped_pages.values():
+        for page in html_pages.values():
             for line in set(page["content"].splitlines()):
                 normalized = line.strip().lower()
                 if not normalized:
@@ -273,32 +383,25 @@ class WebsiteScraper:
         threshold = max(6, int(total_pages * Config.SCRAPE_BOILERPLATE_RATIO))
         boilerplate = {
             line for line, count in line_pages.items()
-            # Only short lines qualify. Long repeated paragraphs are usually
-            # genuine content (an address block, a standard course description).
             if count >= threshold and len(line) <= 90
         }
         if not boilerplate:
             return 0
 
         gutted = 0
-        for page in scraped_pages.values():
+        for page in html_pages.values():
             original = page["content"]
             kept, previous = [], None
             for line in original.splitlines():
                 normalized = line.strip().lower()
                 if normalized in boilerplate:
                     continue
-                # Collapse immediate repeats left behind by the removal.
                 if normalized and normalized == previous:
                     continue
                 previous = normalized
                 kept.append(line)
             cleaned = "\n".join(kept).strip()
 
-            # Guard: if stripping removed almost everything, this page is built
-            # mostly from shared template text. Keep the original rather than
-            # reducing the page to nothing - an empty page is dropped from the
-            # knowledge base entirely, which silently loses real content.
             if len(cleaned) < max(200, int(len(original) * 0.15)):
                 gutted += 1
                 continue
@@ -308,35 +411,118 @@ class WebsiteScraper:
 
         if gutted:
             logger.info(
-                "[Scraper] Kept %s page(s) unfiltered because boilerplate removal would have "
-                "emptied them.", gutted,
+                "[Scraper] Kept %s page(s) unfiltered because boilerplate removal would have emptied them.", gutted,
             )
         return len(boilerplate)
 
-    def _fetch_and_clean_page(self, url):
-        """Fetches a page, strips navigation/footer boilerplate, extracts clean text and links."""
+    def _fetch_and_clean_page(self, url, anchor_text=None):
+        """
+        Fetches an HTML web page or document (PDF, Word, CSV), extracts clean
+        text content, discovers internal links, and returns structured page data.
+        """
         try:
             resp = self.session.get(
-                url, timeout=Config.SCRAPE_REQUEST_TIMEOUT, allow_redirects=True
+                url, timeout=Config.SCRAPE_REQUEST_TIMEOUT, allow_redirects=True, stream=True
             )
             if resp.status_code != 200:
                 return None
             
-            content_type = resp.headers.get("Content-Type", "")
+            content_type = (resp.headers.get("Content-Type") or "").lower()
+            path_lower = urlparse(url).path.lower()
+
+            # Ignore non-text media (images, videos, archives, executables)
+            if any(path_lower.endswith(ext) for ext in self.MEDIA_EXTENSIONS):
+                return None
+
+            # Skip oversized files (> 20MB)
+            content_length = resp.headers.get("Content-Length")
+            if content_length and content_length.isdigit() and int(content_length) > 20 * 1024 * 1024:
+                return None
+
+            # Check if document format
+            is_pdf = path_lower.endswith(".pdf") or "application/pdf" in content_type
+            is_docx = path_lower.endswith(".docx") or "application/vnd.openxmlformats-officedocument.wordprocessingml" in content_type
+            is_doc = path_lower.endswith(".doc") or "application/msword" in content_type
+            is_csv = path_lower.endswith((".csv", ".tsv")) or "text/csv" in content_type
+            is_txt = path_lower.endswith(".txt") and "text/plain" in content_type
+
+            if is_pdf or is_docx or is_doc or is_csv or is_txt:
+                content_bytes = resp.content
+                if len(content_bytes) > 20 * 1024 * 1024:
+                    return None
+
+                if is_pdf:
+                    cleaned_text = self._parse_pdf_bytes(content_bytes, filename=url)
+                    doc_type = "pdf"
+                elif is_docx:
+                    cleaned_text = self._parse_docx_bytes(content_bytes, filename=url)
+                    doc_type = "docx"
+                elif is_doc:
+                    cleaned_text = self._parse_doc_bytes(content_bytes, filename=url)
+                    doc_type = "doc"
+                elif is_csv:
+                    cleaned_text = self._parse_csv_bytes(content_bytes, filename=url)
+                    doc_type = "csv"
+                else:
+                    cleaned_text = content_bytes.decode("utf-8", errors="replace").strip()
+                    doc_type = "txt"
+
+                if len(cleaned_text) < 50:
+                    return None
+
+                filename = urlparse(url).path.split("/")[-1].split("?")[0]
+                base_name = re.sub(r'\.(pdf|docx|doc|csv|tsv|txt)$', '', filename, flags=re.I)
+                clean_name = re.sub(r'[-_+]', ' ', base_name).strip()
+
+                if anchor_text and len(anchor_text) >= 4 and not re.match(r'^(click|here|download|view|pdf|link|read|more)$', anchor_text, re.I):
+                    title = f"{anchor_text} ({doc_type.upper()} Document)"
+                elif clean_name and len(clean_name) >= 3:
+                    title = f"BMSIT {clean_name.title()} ({doc_type.upper()} Document)"
+                else:
+                    title = f"BMSIT Document {doc_type.upper()}"
+
+                content_hash = hashlib.md5(cleaned_text.encode("utf-8")).hexdigest()
+
+                return {
+                    "url": url,
+                    "title": title,
+                    "content": cleaned_text,
+                    "hash": content_hash,
+                    "links": [],
+                    "is_document": True,
+                    "file_type": doc_type
+                }
+
+            # ---------------- Parse HTML Web Page ----------------
             if "text/html" not in content_type:
                 return None
 
             soup = BeautifulSoup(resp.text, "html.parser")
 
             # Extract links before removing navigation elements
-            links = []
+            discovered_links = []
             for a in soup.find_all("a", href=True):
                 href = a["href"].strip()
-                if href and not href.startswith(("javascript:", "mailto:", "tel:", "#")):
-                    full_link = urljoin(url, href)
-                    # Ignore binary media and archives
-                    if not re.search(r'\.(jpg|jpeg|png|gif|svg|pdf|zip|rar|tar|mp4|exe|css|js)$', full_link, re.I):
-                        links.append(full_link)
+                if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
+                    continue
+                full_link = urljoin(url, href).split("#")[0].rstrip("/")
+                if not full_link or not full_link.startswith(("http://", "https://")):
+                    continue
+                p_lower = urlparse(full_link).path.lower()
+                if any(p_lower.endswith(ext) for ext in self.MEDIA_EXTENSIONS):
+                    continue
+                a_text = a.get_text().strip()
+                a_text = re.sub(r'\s+', ' ', a_text)
+                discovered_links.append((full_link, a_text))
+
+            # Also discover embedded documents in iframes or embeds
+            for el in soup.find_all(["iframe", "embed", "object"], src=True):
+                src = el.get("src", "").strip()
+                if src and not src.startswith(("javascript:", "#")):
+                    full_link = urljoin(url, src).split("#")[0].rstrip("/")
+                    p_lower = urlparse(full_link).path.lower()
+                    if any(p_lower.endswith(ext) for ext in self.DOC_EXTENSIONS):
+                        discovered_links.append((full_link, "Embedded Document"))
 
             # Strip non-content and layout boilerplate tags
             for tag in soup(["script", "style", "noscript", "iframe", "svg", "header", "footer", "nav", "aside", "form"]):
@@ -386,7 +572,6 @@ class WebsiteScraper:
             cleaned_text = "\n".join(lines)
 
             if len(cleaned_text) < 60:
-                # Too little content
                 return None
 
             content_hash = hashlib.md5(cleaned_text.encode("utf-8")).hexdigest()
@@ -396,7 +581,9 @@ class WebsiteScraper:
                 "title": title,
                 "content": cleaned_text,
                 "hash": content_hash,
-                "links": list(set(links))
+                "links": discovered_links,
+                "is_document": False,
+                "file_type": "web"
             }
         except Exception as e:
             logger.debug("Error fetching %s: %s", url, e)
