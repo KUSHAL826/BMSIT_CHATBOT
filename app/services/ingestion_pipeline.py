@@ -151,30 +151,43 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             source_id, hashes, expected_provider=provider
         )
 
-        # Safety net: trust the registry only if the vectors it claims really
-        # exist in the index.
+        # Precise deduplication against active vector index, registry, and stored knowledge
         indexed_keys = rag.source_item_keys(source_id)
-        still_unchanged = []
-        for url in unchanged:
-            if url in indexed_keys:
-                still_unchanged.append(url)
-            else:
-                reasons[url] = "vectors-missing"
-                changed.append(url)
-        unchanged = still_unchanged
-
-        # Additional protection: If content is already present in stored knowledge
-        # and has matching vectors with identical content, DO NOT re-embed!
+        registry_items = IngestionRegistry.items(source_id)
         stored_items = KnowledgeStore.get_items(source_id)
+
         final_changed = []
+        final_unchanged = set(unchanged)
+
         for url in changed:
-            if url in indexed_keys and url in stored_items:
-                prev_text = (stored_items[url].get("text") or "").strip()
-                if prev_text and content_hash(prev_text) == hashes.get(url):
-                    unchanged.append(url)
-                    reasons[url] = "already-indexed-unchanged"
+            # If already present in vector store with matching content, DO NOT re-embed!
+            if url in indexed_keys:
+                # Check registry content hash
+                reg_item = registry_items.get(url)
+                if reg_item and reg_item.get("content_hash") == hashes.get(url):
+                    final_unchanged.add(url)
+                    reasons[url] = "already-indexed-registry-match"
                     continue
+
+                # Check stored knowledge text
+                stored_item = stored_items.get(url)
+                if stored_item:
+                    prev_text = (stored_item.get("text") or "").strip()
+                    if prev_text and content_hash(prev_text) == hashes.get(url):
+                        final_unchanged.add(url)
+                        reasons[url] = "already-indexed-unchanged"
+                        continue
+
             final_changed.append(url)
+
+        # Filter unchanged to only those with confirmed live vectors
+        confirmed_unchanged = [url for url in final_unchanged if url in indexed_keys]
+        for url in set(final_unchanged) - set(confirmed_unchanged):
+            reasons[url] = "vectors-missing"
+            if url not in final_changed:
+                final_changed.append(url)
+
+        unchanged = confirmed_unchanged
         changed = final_changed
 
         reason_counts = {}

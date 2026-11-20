@@ -1,4 +1,5 @@
 import hashlib
+import html
 import io
 import json
 import logging
@@ -79,7 +80,7 @@ class WebsiteScraper:
         
         self.session = requests.Session()
         self.session.headers.update({
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 BMSIT-AI-Bot/1.0",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
             "Accept-Language": "en-US,en;q=0.9",
         })
@@ -101,7 +102,7 @@ class WebsiteScraper:
         Determines whether a URL is permitted for text crawling.
         Strictly allows ONLY:
           1. BMSIT official website and subdomains (*.bmsit.ac.in)
-          2. Faculty LinkedIn profiles (linkedin.com/in/*)
+          2. Faculty LinkedIn profiles (linkedin.com/in/*, linkedin.com/pub/*)
         NO IRINS, NO research portals, NO other portals, NO documents or photos.
         Rest of all external links are strictly excluded from scraping.
         """
@@ -131,9 +132,17 @@ class WebsiteScraper:
         if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
             return True
 
-        # 2. ONLY Faculty LinkedIn profiles (linkedin.com/in/*)
+        # 2. ONLY Faculty LinkedIn profiles (linkedin.com/in/*, /pub/*)
         if "linkedin.com" in netloc:
-            if "/in/" in path_lower or "/pub/" in path_lower or len(path_lower.strip("/")) > 2:
+            # Exclude non-profile pages like feeds, companies, jobs, login, search
+            non_profile_prefixes = (
+                "/feed", "/company", "/jobs", "/login", "/learning",
+                "/school", "/groups", "/pulse", "/posts", "/signup",
+                "/legal", "/help", "/messaging", "/mynetwork", "/notifications"
+            )
+            if any(path_lower.startswith(p) for p in non_profile_prefixes):
+                return False
+            if "/in/" in path_lower or "/pub/" in path_lower:
                 return True
             return False
 
@@ -252,7 +261,7 @@ class WebsiteScraper:
             for old_url, old_data in old_pages.items():
                 if old_url not in scraped_pages:
                     try:
-                        probe = self.session.get(old_url, timeout=5, allow_redirects=True, stream=True)
+                        probe = self.session.get(old_url, timeout=15, allow_redirects=True, stream=True)
                         if probe.status_code in (404, 410):
                             detected_changes.append({
                                 "url": old_url,
@@ -261,30 +270,22 @@ class WebsiteScraper:
                                 "summary": f"Page deleted from website (HTTP {probe.status_code}) - removed from vector database"
                             })
                             deleted_urls.add(old_url)
-                        elif probe.status_code == 200 and "text/html" in (probe.headers.get("Content-Type") or ""):
-                            # Still alive on server, unreached in this crawl run
+                        else:
+                            # Still alive or unreached in this crawl run - safely retain
                             detected_changes.append({
                                 "url": old_url,
                                 "title": old_data.get("title", "Unknown"),
                                 "change_type": "RETAINED",
                                 "summary": "Unreached in this crawl - retained from previous run"
                             })
-                        else:
-                            detected_changes.append({
-                                "url": old_url,
-                                "title": old_data.get("title", "Unknown"),
-                                "change_type": "DELETED",
-                                "summary": f"Page unreachable (HTTP {probe.status_code}) - removed from vector database"
-                            })
-                            deleted_urls.add(old_url)
                     except Exception:
+                        # On timeout or transient network error, NEVER mark as deleted! Retain safely.
                         detected_changes.append({
                             "url": old_url,
                             "title": old_data.get("title", "Unknown"),
-                            "change_type": "DELETED",
-                            "summary": "Page unreachable/deleted - removed from vector database"
+                            "change_type": "RETAINED",
+                            "summary": "Page probe timed out or transient error - retained safely"
                         })
-                        deleted_urls.add(old_url)
 
             # Build merged_pages: keep previous valid pages, exclude deleted pages, and record new/modified
             merged_pages = {u: d for u, d in old_pages.items() if u not in deleted_urls}
@@ -407,15 +408,39 @@ class WebsiteScraper:
             if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
                 return None
 
-            resp = self.session.get(
-                url, timeout=Config.SCRAPE_REQUEST_TIMEOUT, allow_redirects=True, stream=True
-            )
-            if resp.status_code != 200:
-                logger.debug("[Scraper] Skipping %s: HTTP status %s", url, resp.status_code)
+            # Resilient fetch with retries to prevent dropping slow or busy pages
+            resp = None
+            max_attempts = 3
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    resp = self.session.get(
+                        url, timeout=Config.SCRAPE_REQUEST_TIMEOUT, allow_redirects=True, stream=True
+                    )
+                    if resp.status_code == 200:
+                        break
+                    elif resp.status_code in (404, 410, 999):
+                        logger.debug("[Scraper] Skipping %s: HTTP status %s", url, resp.status_code)
+                        return None
+                    else:
+                        logger.debug("[Scraper] HTTP status %s on attempt %d for %s", resp.status_code, attempt, url)
+                        if attempt < max_attempts:
+                            time.sleep(0.5 * attempt)
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                    logger.debug("[Scraper] Attempt %d failed for %s: %s", attempt, url, e)
+                    if attempt < max_attempts:
+                        time.sleep(1.0 * attempt)
+                    else:
+                        logger.warning("[Scraper] Timeout/Connection error for %s after %d attempts: %s", url, max_attempts, e)
+                        return None
+                except Exception as e:
+                    logger.debug("[Scraper] Error fetching %s: %s", url, e)
+                    return None
+
+            if not resp or resp.status_code != 200:
                 return None
             
             content_type = (resp.headers.get("Content-Type") or "").lower()
-            if "text/html" not in content_type:
+            if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
                 return None
 
             # Skip Cloudflare Turnstile / anti-bot challenge interstitial pages
@@ -434,7 +459,7 @@ class WebsiteScraper:
             def _normalize_discovered_url(raw_href, current_page_url):
                 if not raw_href or not isinstance(raw_href, str):
                     return None
-                raw_href = raw_href.strip()
+                raw_href = html.unescape(raw_href).strip()
                 if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "#", "whatsapp:", "sms:")):
                     return None
                 if re.search(r'\s', raw_href) or raw_href.upper() in ("NIL", "NULL", "NONE"):
@@ -443,18 +468,28 @@ class WebsiteScraper:
                     raw_href = "https://" + raw_href
 
                 target = urljoin(current_page_url, raw_href).split("#")[0]
-                if "?" not in target:
-                    target = target.rstrip("/")
                 if not target or not target.startswith(("http://", "https://")):
                     return None
 
                 p = urlparse(target)
-                path_lower = p.path.lower()
+                target_path = p.path.lower()
+                target_netloc = p.netloc.lower().split(":")[0].removeprefix("www.")
+
+                # Canonicalize LinkedIn profile URLs: strip tracking query params (?utm_source=..., ?originalSubdomain=...)
+                if "linkedin.com" in target_netloc and ("/in/" in target_path or "/pub/" in target_path):
+                    target = f"{p.scheme}://www.linkedin.com{p.path.rstrip('/')}"
+
+                # Normalize trailing slash
+                if "?" not in target:
+                    target = target.rstrip("/")
+                else:
+                    target = target.rstrip("/") if target.endswith("/") else target
+
                 # Reject malformed relative crawler traps
-                if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
+                if any(ext_dom in target_path for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
                     return None
                 # Skip document files and media (strict rule)
-                if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
+                if any(target_path.endswith(ext) for ext in self.SKIP_EXTENSIONS):
                     return None
                 return target
 
@@ -475,8 +510,8 @@ class WebsiteScraper:
             for el in soup.find_all(["area", "link"], href=True):
                 add_candidate(el["href"])
 
-            # 3. Dynamic attributes (tabs, accordions, modals, dropdowns)
-            for attr in ("data-url", "data-href", "data-link", "data-target"):
+            # 3. Dynamic attributes (tabs, accordions, modals, dropdowns, data routes)
+            for attr in ("data-url", "data-href", "data-link", "data-target", "data-src"):
                 for el in soup.find_all(attrs={attr: True}):
                     add_candidate(el[attr], el.get_text().strip())
 
@@ -484,13 +519,19 @@ class WebsiteScraper:
             for form in soup.find_all("form", action=True):
                 add_candidate(form["action"])
 
-            # 5. Regex search in raw HTML for JavaScript navigation
-            for jl in re.findall(r'(?:location\.href|window\.open|window\.location)\s*=\s*[\'"]([^\'"]+)[\'"]', resp.text, re.I):
-                add_candidate(jl)
+            # 5. Onclick handlers (buttons, cards, menus)
+            for el in soup.find_all(attrs={"onclick": True}):
+                onclick_val = str(el["onclick"])
+                for click_match in re.findall(r'(?:location\.href|window\.open|window\.location|href)\s*=\s*[\'"]([^\'"]+)[\'"]', onclick_val, re.I):
+                    add_candidate(click_match, el.get_text().strip())
 
-            # 6. Regex search in raw HTML for relative routes (/something.php?...)
-            for rm in re.findall(r'[\'"](/[\w\-\./]+\.(?:php|html|htm)(?:\?[\w\-\.\?=&%]*)?)[\'"]', resp.text, re.I):
-                add_candidate(rm)
+            # 6. Regex search in raw HTML for any full HTTP/HTTPS BMSIT or LinkedIn URLs
+            for full_match in re.findall(r'https?://(?:[a-zA-Z0-9\.\-]+\.)?(?:bmsit\.ac\.in|linkedin\.com)[^\s\'"<>]+', resp.text):
+                add_candidate(full_match)
+
+            # 7. Regex search in raw HTML for relative .php / .html routes
+            for rel_match in re.findall(r'[\'\"\(]([a-zA-Z0-9_\-\./]+\.(?:php|html|htm)(?:\?[\w\-\.\?=&%]*)?)[\'\"\)]', resp.text, re.I):
+                add_candidate(rel_match)
 
             # Preserve essential footer contact & helpline information before removing footer
             footer_contact_text = ""
@@ -573,7 +614,19 @@ class WebsiteScraper:
             if footer_contact_text and "Contact for Admissions" not in cleaned_text:
                 cleaned_text += footer_contact_text
 
+            # Even if page text is very short, preserve discovered links so child pages are not dropped
             if len(cleaned_text) < 60:
+                if discovered_links:
+                    return {
+                        "url": url,
+                        "title": title or "BMSIT Navigation Hub",
+                        "content": cleaned_text,
+                        "hash": hashlib.md5(cleaned_text.encode("utf-8")).hexdigest(),
+                        "links": discovered_links,
+                        "is_document": False,
+                        "file_type": "web",
+                        "is_thin_hub": True
+                    }
                 return None
 
             content_hash = hashlib.md5(cleaned_text.encode("utf-8")).hexdigest()
