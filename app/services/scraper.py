@@ -152,94 +152,32 @@ class WebsiteScraper:
         scraper_status.status_message = f"Starting crawl of {self.base_url}"
         scraper_status.error = None
 
-        # Comprehensive BMSIT seed paths across all institutional sections
-        priority_paths = [
-            "",
-            "/about-us.php",
-            "/governing-body.php",
-            "/academic-council.php",
-            "/administration.php",
-            "/admissions.php",
-            "/admission-query.php",
-            "/fee-structure.php",
-            "/hostel-facilities.php",
-            "/placement-new.php",
-            "/academics-overview.php",
-            "/contact-details.php",
-            "/dep-cse.php",
-            "/dep-aiml.php",
-            "/dep-ise.php",
-            "/dep-ece-vlsi-mtech-system.php",
-            "/dep-electrical.php",
-            "/dep-mechanical.php",
-            "/dep-civil.php",
-            "/dep-ete.php",
-            "/dep-mca.php",
-            "/dep-mba.php",
-            "/dep-physics.php",
-            "/dep-chemistry.php",
-            "/dep-maths.php",
-            "/scholarships.php",
-            "/library-facilities.php",
-            "/autonomous.php",
-            "/curriculum.php",
-            "/academic-calendar.php",
-            "/examinations.php",
-            "/results.php",
-            "/iqac.php",
-            "/nirf-new.php",
-            "/aicte-idea-lab.php",
-            "/career.php",
-            "/mandatory-disclosure.php",
-            "/circular.php",
-            "/timetables.php",
-            "/hefc.php",
-            "/proceedings.php",
-            "/announcement.php",
-            "/research.php",
-            "/centers-of-excellence.php",
-            "/anti-ragging.php",
-            "/grievance-redressal.php",
-            "/code-of-conduct.php",
-            "/statutory-committees.php",
-            "https://staff.bmsit.ac.in/",
-            "https://student.bmsit.ac.in/",
-            "https://results.bmsit.ac.in/",
-            "https://projects.bmsit.ac.in/",
-            "https://alumni.bmset.org/"
-        ]
+        # Seed dynamically starting from the base URL (e.g. https://bmsit.ac.in/)
+        # No hardcoded static paths: every link, new page, and subportal is discovered live
+        seed_url = self.base_url.split("#")[0].rstrip("/")
         visited = set()
-        queue = []
+        queue = [(seed_url, 0)]
+        queued_urls = {seed_url}
         anchor_map = {}
 
-        for p in priority_paths:
-            if p.startswith("http://") or p.startswith("https://"):
-                full_u = p.split("#")[0].rstrip("/")
-            else:
-                full_u = urljoin(self.base_url, p).split("#")[0].rstrip("/")
-            if full_u and not any(q[0] == full_u for q in queue):
-                queue.append((full_u, 0))
-
-        # Load previous state for change detection and seed existing pages
+        # Load previous state for change detection (NEW, MODIFIED, DELETED)
         previous_state = StorageService.load_scrape_state()
         old_pages = previous_state.get("pages", {})
-
-        # Ensure previously scraped URLs stay in the queue
-        for old_u in old_pages:
-            clean_old = old_u.split("#")[0].rstrip("/")
-            if clean_old and not any(q[0] == clean_old for q in queue):
-                queue.append((clean_old, 0))
-
-        queued_urls = set(q[0] for q in queue)
         scraped_pages = {}
         detected_changes = []
+        deleted_urls = set()
 
         try:
             while queue and len(visited) < self.max_pages:
                 url, depth = queue.pop(0)
 
                 # Normalize URL
-                url = url.split("#")[0].rstrip("/")
+                url = url.split("#")[0]
+                if "?" not in url:
+                    url = url.rstrip("/")
+                else:
+                    url = url.rstrip("/") if url.endswith("/") else url
+
                 if not url or url in visited:
                     continue
                 
@@ -260,14 +198,19 @@ class WebsiteScraper:
                 scraper_status.pages_scraped = len(scraped_pages)
 
                 # Discover new links dynamically if depth allows (only from internal BMSIT domains)
-                if depth < self.max_depth and len(queue) < 10000 and self._is_internal_domain(url):
+                if depth < self.max_depth and len(queue) < 50000 and self._is_internal_domain(url):
                     for link_item in page_data.get("links", []):
                         if isinstance(link_item, tuple):
                             link_url, link_anchor = link_item
                         else:
                             link_url, link_anchor = link_item, ""
 
-                        clean_link = link_url.split("#")[0].rstrip("/")
+                        clean_link = link_url.split("#")[0]
+                        if "?" not in clean_link:
+                            clean_link = clean_link.rstrip("/")
+                        else:
+                            clean_link = clean_link.rstrip("/") if clean_link.endswith("/") else clean_link
+
                         if clean_link and clean_link not in visited and clean_link not in queued_urls:
                             if self._is_allowed_domain(clean_link):
                                 queue.append((clean_link, depth + 1))
@@ -284,7 +227,7 @@ class WebsiteScraper:
             removed_lines = self._strip_cross_page_boilerplate(scraped_pages)
             logger.info("[Scraper] Filtered %s repeated boilerplate line(s) site-wide.", removed_lines)
 
-            # Change detection runs on the CLEANED text
+            # 1. Detect NEW and MODIFIED pages among currently scraped live pages
             for url, page_data in scraped_pages.items():
                 old_info = old_pages.get(url)
                 if not old_info:
@@ -292,7 +235,7 @@ class WebsiteScraper:
                         "url": url,
                         "title": page_data["title"],
                         "change_type": "NEW",
-                        "summary": f"New page content ({len(page_data['content'])} characters)"
+                        "summary": f"New page discovered ({len(page_data['content'])} characters)"
                     })
                 elif old_info.get("hash") != page_data["hash"]:
                     detected_changes.append({
@@ -302,18 +245,46 @@ class WebsiteScraper:
                         "summary": f"Content updated (diff size: {len(page_data['content']) - old_info.get('length', 0):+d} chars)"
                     })
 
-            # Pages known from earlier crawls that this run did not reach
+            # 2. Probe unreached pages from previous crawl to detect DELETED pages
             for old_url, old_data in old_pages.items():
                 if old_url not in scraped_pages:
-                    detected_changes.append({
-                        "url": old_url,
-                        "title": old_data.get("title", "Unknown"),
-                        "change_type": "MISSING",
-                        "summary": "Not reached in this crawl - previously stored content retained"
-                    })
+                    try:
+                        probe = self.session.get(old_url, timeout=5, allow_redirects=True, stream=True)
+                        if probe.status_code in (404, 410):
+                            detected_changes.append({
+                                "url": old_url,
+                                "title": old_data.get("title", "Unknown"),
+                                "change_type": "DELETED",
+                                "summary": f"Page deleted from website (HTTP {probe.status_code}) - removed from vector database"
+                            })
+                            deleted_urls.add(old_url)
+                        elif probe.status_code == 200 and "text/html" in (probe.headers.get("Content-Type") or ""):
+                            # Still alive on server, unreached in this crawl run
+                            detected_changes.append({
+                                "url": old_url,
+                                "title": old_data.get("title", "Unknown"),
+                                "change_type": "RETAINED",
+                                "summary": "Unreached in this crawl - retained from previous run"
+                            })
+                        else:
+                            detected_changes.append({
+                                "url": old_url,
+                                "title": old_data.get("title", "Unknown"),
+                                "change_type": "DELETED",
+                                "summary": f"Page unreachable (HTTP {probe.status_code}) - removed from vector database"
+                            })
+                            deleted_urls.add(old_url)
+                    except Exception:
+                        detected_changes.append({
+                            "url": old_url,
+                            "title": old_data.get("title", "Unknown"),
+                            "change_type": "DELETED",
+                            "summary": "Page unreachable/deleted - removed from vector database"
+                        })
+                        deleted_urls.add(old_url)
 
-            # Merge crawl state instead of overwriting it
-            merged_pages = dict(old_pages)
+            # Build merged_pages: keep previous valid pages, exclude deleted pages, and record new/modified
+            merged_pages = {u: d for u, d in old_pages.items() if u not in deleted_urls}
             for u, d in scraped_pages.items():
                 merged_pages[u] = {
                     "hash": d["hash"],
@@ -332,11 +303,13 @@ class WebsiteScraper:
             state["summary"] = changes_summary_text
             StorageService.save_scrape_state(state)
 
-            # Snapshot of raw crawled content, merged with previous snapshots
+            # Snapshot of raw crawled content, purged of deleted pages
             scrape_batch_file = Config.SCRAPED_DIR / "bmsit_web_content.json"
             snapshot = read_json(scrape_batch_file, default={}) or {}
             if not isinstance(snapshot, dict):
                 snapshot = {}
+            for del_u in deleted_urls:
+                snapshot.pop(del_u, None)
             snapshot.update(scraped_pages)
             atomic_write_json(scrape_batch_file, snapshot)
 
@@ -345,7 +318,8 @@ class WebsiteScraper:
                 "total_pages": len(scraped_pages),
                 "changes": detected_changes,
                 "changes_summary": changes_summary_text,
-                "scraped_pages": scraped_pages
+                "scraped_pages": scraped_pages,
+                "deleted_urls": list(deleted_urls)
             }
             scraper_status.last_result = result
             scraper_status.status_message = f"Crawled {len(scraped_pages)} pages and documents successfully."
@@ -624,17 +598,17 @@ class WebsiteScraper:
             return "No changes detected. Website content is up to date."
         new_c = sum(1 for c in changes if c["change_type"] == "NEW")
         mod_c = sum(1 for c in changes if c["change_type"] == "MODIFIED")
-        missing_c = sum(1 for c in changes if c["change_type"] in ("MISSING", "DELETED"))
+        del_c = sum(1 for c in changes if c["change_type"] == "DELETED")
         parts = []
         if new_c:
-            parts.append(f"{new_c} new page{'s' if new_c > 1 else ''}")
+            parts.append(f"{new_c} new page{'s' if new_c > 1 else ''} discovered")
         if mod_c:
             parts.append(f"{mod_c} updated page{'s' if mod_c > 1 else ''}")
-        if missing_c:
-            parts.append(f"{missing_c} page{'s' if missing_c > 1 else ''} not reached (content retained)")
+        if del_c:
+            parts.append(f"{del_c} deleted page{'s' if del_c > 1 else ''} purged")
         if not parts:
             return "No content changes detected. Knowledge base already up to date."
-        return "Detected: " + ", ".join(parts)
+        return "Changes detected: " + ", ".join(parts)
 
 
 def start_async_scrape(base_url=None, max_pages=None, max_depth=None, on_complete=None):

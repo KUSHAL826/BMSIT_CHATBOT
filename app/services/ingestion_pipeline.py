@@ -209,7 +209,33 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             replace_missing=False,
         )
 
+        # ---------------- purge confirmed deleted pages ----------------
+        deleted_urls = crawl.get("deleted_urls") or []
+        if deleted_urls:
+            logger.info("[Delta] Purging %d deleted page(s) from vector index and registry: %s", len(deleted_urls), deleted_urls)
+            try:
+                rag.apply_source_update(source_id, [], replace_keys=set(deleted_urls))
+                KnowledgeStore.delete_items(source_id, deleted_urls)
+                IngestionRegistry.forget_items(source_id, deleted_urls)
+            except Exception as e:
+                logger.warning("[Delta] Error during deleted page purge: %s", e)
+
         if not changed:
+            if deleted_urls:
+                run_record = {
+                    "id": f"crawl-{int(time.time())}",
+                    "timestamp": StorageService._now_ist_str(),
+                    "trigger": trigger,
+                    "status": "success",
+                    "status_label": "COMPLETED",
+                    "pages_crawled": len(pages),
+                    "chunks_active": rag.count_source_chunks(source_id),
+                    "summary": f"Crawled {len(pages)} pages | {len(deleted_urls)} deleted page(s) purged from vector store",
+                    "changes_count": len(deleted_urls),
+                    "changes": crawl.get("changes", []),
+                }
+                StorageService.record_crawl_run(run_record)
+                return run_record
             return _nothing_to_do(rag, source_id, len(pages), len(unchanged), crawl, trigger)
 
         # ---------------- chunk only what changed ----------------
