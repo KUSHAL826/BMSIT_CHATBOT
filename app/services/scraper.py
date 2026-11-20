@@ -109,8 +109,10 @@ class WebsiteScraper:
     def _is_allowed_domain(self, target_url: str) -> bool:
         """
         Determines whether a URL is permitted for text crawling.
-        Allows ALL links discovered from the BMSIT website to be scraped for text.
-        Excludes document files (PDF/Word/CSV), photos/media, and crawler-trap nested paths.
+        Strictly allows ONLY:
+          1. BMSIT official pages and subdomains (*.bmsit.ac.in, bmsit.irins.org, bmset.org, alumni.bmset.org)
+          2. Faculty LinkedIn profiles (linkedin.com/in/*)
+        Rest of all external links are strictly excluded from scraping.
         """
         if not target_url:
             return False
@@ -126,16 +128,26 @@ class WebsiteScraper:
         if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
             return False
 
-        # Skip document files and media by extension
+        # Skip document files and media by extension (PDF, Word, JPG, PNG, etc.)
         if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
             return False
 
-        # Skip social media login redirects where no public article text is available
-        if any(soc in netloc for soc in ("facebook.com", "instagram.com", "twitter.com", "x.com", "play.google.com", "apple.com")):
+        # 1. BMSIT internal domains & institutional subdomains
+        if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
+            return True
+        if "bmsit" in netloc:
+            return True
+        if netloc == "bmset.org" or netloc.endswith(".bmset.org"):
+            return True
+
+        # 2. Faculty LinkedIn profiles
+        if "linkedin.com" in netloc:
+            if "/in/" in path_lower or "/pub/" in path_lower or len(path_lower.strip("/")) > 2:
+                return True
             return False
 
-        # Every other link found on the BMSIT website is permitted for text extraction!
-        return True
+        # Rest of all links must NOT be scraped!
+        return False
 
     def run_sync(self, keep_running_for_indexing=False):
         """
