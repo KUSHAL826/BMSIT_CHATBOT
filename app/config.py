@@ -52,8 +52,8 @@ _SPEC = {
 
     # Crawler
     "BMSIT_DEFAULT_URL": ("str", "https://bmsit.ac.in/"),
-    "SCRAPE_DEPTH": ("int", 4),
-    "SCRAPE_MAX_PAGES": ("int", 800),
+    "SCRAPE_DEPTH": ("int", 10),
+    "SCRAPE_MAX_PAGES": ("int", 2500),
     "SCRAPE_BOILERPLATE_RATIO": ("float", 0.30),
     "SCRAPE_REQUEST_TIMEOUT": ("int", 10),
     "SCRAPE_DELAY": ("float", 0.12),

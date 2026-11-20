@@ -101,11 +101,11 @@
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="max-pages-input">Max Pages to Crawl</label>
-            <input type="number" id="max-pages-input" class="form-input" value="{{ settings.scrape_max_pages }}" min="5" max="100">
+            <input type="number" id="max-pages-input" class="form-input" value="{{ settings.scrape_max_pages }}" min="5" max="5000">
           </div>
           <div class="form-group">
             <label class="form-label" for="max-depth-input">Crawl Depth</label>
-            <input type="number" id="max-depth-input" class="form-input" value="{{ settings.scrape_depth }}" min="1" max="5">
+            <input type="number" id="max-depth-input" class="form-input" value="{{ settings.scrape_depth }}" min="1" max="25">
           </div>
         </div>
 

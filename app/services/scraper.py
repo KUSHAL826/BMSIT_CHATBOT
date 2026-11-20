@@ -67,11 +67,11 @@ class WebsiteScraper:
             or os.getenv("BMSIT_DEFAULT_URL")
             or settings.get("bmsit_url", Config.BMSIT_DEFAULT_URL)
         )
-        # Environment variables take direct priority
+        # Environment variables take direct priority, then explicit arg, then stored settings, then Config
         env_max_pages = os.getenv("SCRAPE_MAX_PAGES")
         env_depth = os.getenv("SCRAPE_DEPTH")
-        self.max_pages = int(env_max_pages) if env_max_pages else (max_pages or Config.SCRAPE_MAX_PAGES)
-        self.max_depth = int(env_depth) if env_depth else (max_depth or Config.SCRAPE_DEPTH)
+        self.max_pages = int(env_max_pages) if env_max_pages else (max_pages or settings.get("scrape_max_pages") or Config.SCRAPE_MAX_PAGES)
+        self.max_depth = int(env_depth) if env_depth else (max_depth or settings.get("scrape_depth") or Config.SCRAPE_DEPTH)
         
         parsed = urlparse(self.base_url)
         self.domain = parsed.netloc.lower()
@@ -85,12 +85,26 @@ class WebsiteScraper:
         })
 
     def _is_internal_domain(self, target_url: str) -> bool:
-        """Returns True if the URL belongs to BMSIT internal domain or subdomains."""
+        """
+        Returns True if the URL belongs to BMSIT internal institutional domains
+        or affiliated campus platforms (including subdomains and trust portals).
+        """
         if not target_url:
             return False
         parsed = urlparse(target_url)
         netloc = parsed.netloc.lower().split(":")[0].removeprefix("www.")
-        return netloc == self.apex_domain or netloc.endswith("." + self.apex_domain)
+        if not netloc:
+            return True
+        # BMSIT apex domain and all subdomains (e.g. staff.bmsit.ac.in, student.bmsit.ac.in, results.bmsit.ac.in)
+        if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
+            return True
+        # Parent trust and alumni portals (bmset.org, alumni.bmset.org)
+        if netloc == "bmset.org" or netloc.endswith(".bmset.org"):
+            return True
+        # Institutional IRINS faculty portal
+        if "irins.org" in netloc and "bmsit" in netloc:
+            return True
+        return False
 
     def _is_allowed_domain(self, target_url: str) -> bool:
         """
@@ -435,38 +449,71 @@ class WebsiteScraper:
 
             soup = BeautifulSoup(resp.text, "html.parser")
 
-            # Extract links before removing navigation elements
+            # Extract links dynamically across tags, attributes, scripts, and routes
             domain_without_scheme_re = re.compile(
                 r'^(?:[a-zA-Z0-9-]+\.)+(?:com|org|net|edu|gov|in|io|co|ac\.in)(?:/|$)', re.I
             )
-            discovered_links = []
-            for a in soup.find_all("a", href=True):
-                href = a["href"].strip()
-                if not href or href.startswith(("javascript:", "mailto:", "tel:", "#", "whatsapp:", "sms:")):
-                    continue
-                # Skip invalid developer placeholders (e.g. "NIL", "Scopus Author ID: ...")
-                if re.search(r'\s', href) or href.upper() in ("NIL", "NULL", "NONE"):
-                    continue
-                # If href is an external domain without protocol (e.g. linkedin.com/...), prepend https://
-                if domain_without_scheme_re.match(href):
-                    href = "https://" + href
 
-                full_link = urljoin(url, href).split("#")[0].rstrip("/")
-                if not full_link or not full_link.startswith(("http://", "https://")):
-                    continue
-                
-                # Check that full link does not contain a malformed nested domain in path
-                p = urlparse(full_link)
+            def _normalize_discovered_url(raw_href, current_page_url):
+                if not raw_href or not isinstance(raw_href, str):
+                    return None
+                raw_href = raw_href.strip()
+                if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "#", "whatsapp:", "sms:")):
+                    return None
+                if re.search(r'\s', raw_href) or raw_href.upper() in ("NIL", "NULL", "NONE"):
+                    return None
+                if domain_without_scheme_re.match(raw_href):
+                    raw_href = "https://" + raw_href
+
+                target = urljoin(current_page_url, raw_href).split("#")[0]
+                if "?" not in target:
+                    target = target.rstrip("/")
+                if not target or not target.startswith(("http://", "https://")):
+                    return None
+
+                p = urlparse(target)
                 path_lower = p.path.lower()
+                # Reject malformed relative crawler traps
                 if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
-                    continue
-
-                # Do NOT queue documents (PDF, Word, Excel, etc.) or media
+                    return None
+                # Skip document files and media (strict rule)
                 if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
-                    continue
-                a_text = a.get_text().strip()
-                a_text = re.sub(r'\s+', ' ', a_text)
-                discovered_links.append((full_link, a_text))
+                    return None
+                return target
+
+            discovered_links = []
+            seen_discovered = set()
+
+            def add_candidate(raw_target, anchor_label=""):
+                norm = _normalize_discovered_url(raw_target, url)
+                if norm and norm not in seen_discovered:
+                    seen_discovered.add(norm)
+                    discovered_links.append((norm, re.sub(r'\s+', ' ', (anchor_label or '').strip())))
+
+            # 1. Standard anchor <a> tags
+            for a in soup.find_all("a", href=True):
+                add_candidate(a["href"], a.get_text().strip())
+
+            # 2. Area and link tags
+            for el in soup.find_all(["area", "link"], href=True):
+                add_candidate(el["href"])
+
+            # 3. Dynamic attributes (tabs, accordions, modals, dropdowns)
+            for attr in ("data-url", "data-href", "data-link", "data-target"):
+                for el in soup.find_all(attrs={attr: True}):
+                    add_candidate(el[attr], el.get_text().strip())
+
+            # 4. Form actions (search/filtering/portal forms)
+            for form in soup.find_all("form", action=True):
+                add_candidate(form["action"])
+
+            # 5. Regex search in raw HTML for JavaScript navigation
+            for jl in re.findall(r'(?:location\.href|window\.open|window\.location)\s*=\s*[\'"]([^\'"]+)[\'"]', resp.text, re.I):
+                add_candidate(jl)
+
+            # 6. Regex search in raw HTML for relative routes (/something.php?...)
+            for rm in re.findall(r'[\'"](/[\w\-\./]+\.(?:php|html|htm)(?:\?[\w\-\.\?=&%]*)?)[\'"]', resp.text, re.I):
+                add_candidate(rm)
 
             # Preserve essential footer contact & helpline information before removing footer
             footer_contact_text = ""
