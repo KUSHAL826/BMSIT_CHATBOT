@@ -85,6 +85,15 @@ class WebsiteScraper:
             "Accept-Language": "en-US,en;q=0.9",
         })
 
+    @property
+    def request_timeout(self):
+        """
+        Request timeout for crawling and probing.
+        Returns None when SCRAPE_REQUEST_TIMEOUT is 0 or unset, imposing NO time limit.
+        """
+        val = Config.SCRAPE_REQUEST_TIMEOUT
+        return val if (val is not None and val > 0) else None
+
     def _is_internal_domain(self, target_url: str) -> bool:
         """
         Returns True ONLY if the URL belongs to BMSIT internal domain or subdomains (*.bmsit.ac.in).
@@ -261,7 +270,7 @@ class WebsiteScraper:
             for old_url, old_data in old_pages.items():
                 if old_url not in scraped_pages:
                     try:
-                        probe = self.session.get(old_url, timeout=15, allow_redirects=True, stream=True)
+                        probe = self.session.get(old_url, timeout=self.request_timeout, allow_redirects=True, stream=True)
                         if probe.status_code in (404, 410):
                             detected_changes.append({
                                 "url": old_url,
@@ -414,7 +423,7 @@ class WebsiteScraper:
             for attempt in range(1, max_attempts + 1):
                 try:
                     resp = self.session.get(
-                        url, timeout=Config.SCRAPE_REQUEST_TIMEOUT, allow_redirects=True, stream=True
+                        url, timeout=self.request_timeout, allow_redirects=True, stream=True
                     )
                     if resp.status_code == 200:
                         break
@@ -614,14 +623,14 @@ class WebsiteScraper:
             if footer_contact_text and "Contact for Admissions" not in cleaned_text:
                 cleaned_text += footer_contact_text
 
-            # Even if page text is very short, preserve discovered links so child pages are not dropped
-            if len(cleaned_text) < 60:
+            # If the page has no body text at all, preserve discovered links if available
+            if not cleaned_text:
                 if discovered_links:
                     return {
                         "url": url,
                         "title": title or "BMSIT Navigation Hub",
-                        "content": cleaned_text,
-                        "hash": hashlib.md5(cleaned_text.encode("utf-8")).hexdigest(),
+                        "content": "",
+                        "hash": hashlib.md5(b"").hexdigest(),
                         "links": discovered_links,
                         "is_document": False,
                         "file_type": "web",

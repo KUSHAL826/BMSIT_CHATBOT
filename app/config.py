@@ -55,9 +55,9 @@ _SPEC = {
     "SCRAPE_DEPTH": ("int", 10),
     "SCRAPE_MAX_PAGES": ("int", 2500),
     "SCRAPE_BOILERPLATE_RATIO": ("float", 0.30),
-    "SCRAPE_REQUEST_TIMEOUT": ("int", 35),
+    "SCRAPE_REQUEST_TIMEOUT": ("int", 0),
     "SCRAPE_DELAY": ("float", 0.05),
-    "SCRAPE_MIN_PAGE_TOKENS": ("int", 20),
+    "SCRAPE_MIN_PAGE_TOKENS": ("int", 0),
 
     # Scheduler
     "SCHEDULE_TIME": ("str", "07:00"),

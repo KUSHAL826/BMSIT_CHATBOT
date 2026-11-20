@@ -127,6 +127,27 @@ class TestWebsiteScraperDeep(unittest.TestCase):
         self.assertIn("https://staff.bmsit.ac.in/sims/login.php", links)
         self.assertIn("https://bmsit.ac.in/placement-new.php", links)
 
+    def test_unlimited_timeout_behavior(self):
+        """When SCRAPE_REQUEST_TIMEOUT is 0, request_timeout must be None (no time limit)."""
+        with patch("app.config.Config.SCRAPE_REQUEST_TIMEOUT", 0):
+            self.assertIsNone(self.scraper.request_timeout, "Timeout must be None when 0 (unlimited)")
+
+    def test_no_token_limit_preserves_full_pages(self):
+        """Scraper and ingestion must preserve full pages and never drop pages on token or length limits."""
+        short_html = """
+        <html><body><p>Dean Office: +91-80-28561576</p></body></html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.text = short_html
+
+        with patch.object(self.scraper.session, "get", return_value=mock_resp):
+            page_data = self.scraper._fetch_and_clean_page("https://bmsit.ac.in/contact-short.php")
+
+        self.assertIsNotNone(page_data, "Should not drop short pages")
+        self.assertIn("Dean Office: +91-80-28561576", page_data["content"])
+
     def test_retention_on_probe_timeout(self):
         """Unreached pages that time out or encounter errors during probing must be RETAINED, never deleted."""
         # Simulate an old crawl with one page

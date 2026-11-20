@@ -131,20 +131,21 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
         # ---------------- change detection ----------------
         # Check content changes against previous crawl to only embed new/modified pages
         hashes, thin_pages = {}, []
+        min_tokens = Config.SCRAPE_MIN_PAGE_TOKENS or 0
         for url, page in pages.items():
             text = (page.get("content") or "").strip()
             if not text:
                 thin_pages.append(url)
                 continue
-            if count_tokens(text) < Config.SCRAPE_MIN_PAGE_TOKENS:
+            if min_tokens > 0 and count_tokens(text) < min_tokens:
                 thin_pages.append(url)
                 continue
             hashes[url] = content_hash(text)
 
         if thin_pages:
             logger.info(
-                "[Delta] Skipped %s page(s) with less than %s tokens of content.",
-                len(thin_pages), Config.SCRAPE_MIN_PAGE_TOKENS,
+                "[Delta] Skipped %s page(s) with no text content.",
+                len(thin_pages),
             )
 
         changed, unchanged, reasons = IngestionRegistry.decide_batch(
