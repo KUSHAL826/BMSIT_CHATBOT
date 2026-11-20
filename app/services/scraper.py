@@ -94,38 +94,34 @@ class WebsiteScraper:
 
     def _is_allowed_domain(self, target_url: str) -> bool:
         """
-        Determines whether a URL is permitted for crawling and text extraction.
-        Allows BMSIT internal pages, IRINS faculty portals, and LinkedIn profiles.
-        Rejects malformed relative paths containing nested domains.
+        Determines whether a URL is permitted for text crawling.
+        Allows ALL links discovered from the BMSIT website to be scraped for text.
+        Excludes document files (PDF/Word/CSV), photos/media, and crawler-trap nested paths.
         """
         if not target_url:
             return False
         parsed = urlparse(target_url)
+        if parsed.scheme not in ("http", "https"):
+            return False
         netloc = parsed.netloc.lower().split(":")[0].removeprefix("www.")
         if not netloc:
-            return True
+            return False
+
         # Reject malformed URLs containing fake nested domain paths (e.g. /linkedin.com/, /bmsit.irins.org/)
         path_lower = parsed.path.lower()
         if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
             return False
 
-        # 1. BMSIT internal domains & institutional subdomains
-        if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
-            return True
+        # Skip document files and media by extension
+        if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
+            return False
 
-        # 2. IRINS faculty & institutional portals (e.g. bmsit.irins.org, irins.org)
-        if "irins.org" in netloc:
-            return True
+        # Skip social media login redirects where no public article text is available
+        if any(soc in netloc for soc in ("facebook.com", "instagram.com", "twitter.com", "x.com", "play.google.com", "apple.com")):
+            return False
 
-        # 3. LinkedIn profiles linked from faculty / department pages
-        if "linkedin.com" in netloc:
-            return True
-
-        # 4. Academic research profiles
-        if any(prof in netloc for prof in ("orcid.org", "researchgate.net", "scholar.google")):
-            return True
-
-        return False
+        # Every other link found on the BMSIT website is permitted for text extraction!
+        return True
 
     def run_sync(self, keep_running_for_indexing=False):
         """
@@ -180,14 +176,33 @@ class WebsiteScraper:
             "/nirf-new.php",
             "/aicte-idea-lab.php",
             "/career.php",
-            "/mandatory-disclosure.php"
+            "/mandatory-disclosure.php",
+            "/circular.php",
+            "/timetables.php",
+            "/hefc.php",
+            "/proceedings.php",
+            "/announcement.php",
+            "/research.php",
+            "/centers-of-excellence.php",
+            "/anti-ragging.php",
+            "/grievance-redressal.php",
+            "/code-of-conduct.php",
+            "/statutory-committees.php",
+            "https://staff.bmsit.ac.in/",
+            "https://student.bmsit.ac.in/",
+            "https://results.bmsit.ac.in/",
+            "https://projects.bmsit.ac.in/",
+            "https://alumni.bmset.org/"
         ]
         visited = set()
         queue = []
         anchor_map = {}
 
         for p in priority_paths:
-            full_u = urljoin(self.base_url, p).split("#")[0].rstrip("/")
+            if p.startswith("http://") or p.startswith("https://"):
+                full_u = p.split("#")[0].rstrip("/")
+            else:
+                full_u = urljoin(self.base_url, p).split("#")[0].rstrip("/")
             if full_u and not any(q[0] == full_u for q in queue):
                 queue.append((full_u, 0))
 
@@ -427,7 +442,7 @@ class WebsiteScraper:
             discovered_links = []
             for a in soup.find_all("a", href=True):
                 href = a["href"].strip()
-                if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
+                if not href or href.startswith(("javascript:", "mailto:", "tel:", "#", "whatsapp:", "sms:")):
                     continue
                 # Skip invalid developer placeholders (e.g. "NIL", "Scopus Author ID: ...")
                 if re.search(r'\s', href) or href.upper() in ("NIL", "NULL", "NONE"):
@@ -469,8 +484,8 @@ class WebsiteScraper:
                     card_text = f"\nMember: {name_el.get_text().strip()} | Role: {role_el.get_text().strip()}\n"
                     card.replace_with(soup.new_string(card_text))
 
-            # Strip non-content and layout boilerplate tags
-            for tag in soup(["script", "style", "noscript", "iframe", "svg", "header", "footer", "nav", "aside", "form"]):
+            # Strip non-content and layout boilerplate tags (never include images, photos, videos, or media)
+            for tag in soup(["script", "style", "noscript", "iframe", "svg", "header", "footer", "nav", "aside", "form", "img", "video", "audio", "canvas", "picture", "figure", "source"]):
                 tag.decompose()
 
             # Strip BMSIT-specific navigation, sidebars, submenus, and footer sections
@@ -492,12 +507,15 @@ class WebsiteScraper:
             slug = urlparse(url).path.strip("/").replace(".php", "").replace("-", " ").title()
 
             url_lower = url.lower()
-            if "linkedin.com" in url_lower:
+            if not self._is_internal_domain(url):
                 page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
-                title = page_title or f"LinkedIn Profile - {slug}"
-            elif "irins.org" in url_lower:
-                page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
-                title = page_title or f"IRINS Faculty Profile - {slug}"
+                netloc_name = urlparse(url).netloc.split(":")[0].removeprefix("www.")
+                if "linkedin.com" in url_lower:
+                    title = page_title or f"LinkedIn Profile - {slug or netloc_name}"
+                elif "irins.org" in url_lower:
+                    title = page_title or f"IRINS Faculty Profile - {slug or netloc_name}"
+                else:
+                    title = page_title or f"{netloc_name.title()} - {slug or 'Overview'}"
             elif "placement" in slug.lower() and "contact" in slug.lower():
                 title = "BMSIT Placement Team Contact Details"
             elif slug.lower() == "contact details":
