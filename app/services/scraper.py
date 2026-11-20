@@ -86,9 +86,14 @@ class WebsiteScraper:
     def _is_allowed_domain(self, target_url: str) -> bool:
         if not target_url:
             return False
-        netloc = urlparse(target_url).netloc.lower().split(":")[0].removeprefix("www.")
+        parsed = urlparse(target_url)
+        netloc = parsed.netloc.lower().split(":")[0].removeprefix("www.")
         if not netloc:
             return True
+        # Reject malformed URLs containing fake nested domain paths (e.g. /linkedin.com/, /bmsit.irins.org/)
+        path_lower = parsed.path.lower()
+        if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
+            return False
         return netloc == self.apex_domain or netloc.endswith("." + self.apex_domain)
 
     def run_sync(self, keep_running_for_indexing=False):
@@ -378,59 +383,90 @@ class WebsiteScraper:
             soup = BeautifulSoup(resp.text, "html.parser")
 
             # Extract links before removing navigation elements
+            domain_without_scheme_re = re.compile(
+                r'^(?:[a-zA-Z0-9-]+\.)+(?:com|org|net|edu|gov|in|io|co|ac\.in)(?:/|$)', re.I
+            )
             discovered_links = []
             for a in soup.find_all("a", href=True):
                 href = a["href"].strip()
                 if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
                     continue
+                # Skip invalid developer placeholders (e.g. "NIL", "Scopus Author ID: ...")
+                if re.search(r'\s', href) or href.upper() in ("NIL", "NULL", "NONE"):
+                    continue
+                # If href is an external domain without protocol (e.g. linkedin.com/...), prepend https://
+                if domain_without_scheme_re.match(href):
+                    href = "https://" + href
+
                 full_link = urljoin(url, href).split("#")[0].rstrip("/")
                 if not full_link or not full_link.startswith(("http://", "https://")):
                     continue
-                p_lower = urlparse(full_link).path.lower()
+                
+                # Check that full link does not contain a malformed nested domain in path
+                p = urlparse(full_link)
+                path_lower = p.path.lower()
+                if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
+                    continue
+
                 # Do NOT queue documents (PDF, Word, Excel, etc.) or media
-                if any(p_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
+                if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
                     continue
                 a_text = a.get_text().strip()
                 a_text = re.sub(r'\s+', ' ', a_text)
                 discovered_links.append((full_link, a_text))
 
+            # Preserve essential footer contact & helpline information before removing footer
+            footer_contact_text = ""
+            footer_addr = soup.find(class_=re.compile(r'footer-address-box', re.I))
+            if footer_addr:
+                addr_lines = [l.strip() for l in footer_addr.get_text(separator="\n").splitlines() if l.strip()]
+                if addr_lines:
+                    footer_contact_text = "\n\n[BMSIT Institutional Address & Admissions Contacts]\n" + "\n".join(addr_lines)
+
+            # Preserve semantic team & faculty cards with explicit labels
+            for card in soup.find_all(class_=re.compile(r'(placement-member|faculty-member|faculty-card|team-member)', re.I)):
+                name_el = card.find(class_=re.compile(r'(name|title)', re.I))
+                role_el = card.find(class_=re.compile(r'(role|designation|post)', re.I))
+                if name_el and role_el:
+                    card_text = f"\nMember: {name_el.get_text().strip()} | Role: {role_el.get_text().strip()}\n"
+                    card.replace_with(soup.new_string(card_text))
+
             # Strip non-content and layout boilerplate tags
             for tag in soup(["script", "style", "noscript", "iframe", "svg", "header", "footer", "nav", "aside", "form"]):
                 tag.decompose()
 
-            # Strip BMSIT-specific navigation, sidebars, and footer sections
+            # Strip BMSIT-specific navigation, sidebars, submenus, and footer sections
             boilerplate_selectors = [
                 ".top-xtra-menu-bg", ".top-xtra-menu", ".top-menu", ".mainMenu", 
                 ".sidebar", "#sidebar", ".footer", ".footer-bg", ".footer-area", 
                 ".bottom-footer", "#footer", "#header", ".navbar", ".dropdown-menu", 
                 ".modal", ".breadcrumbs", ".social-icons", ".quick-links", ".marquee",
-                ".for-mobile-shift"
+                ".for-mobile-shift", ".inner-common-menu-bg-1", ".resp-tabs-list",
+                ".top-forOnline-btn-bg", ".top-admission-btn-bg", ".head-top-btn"
             ]
             for sel in boilerplate_selectors:
                 for el in soup.select(sel):
                     el.decompose()
 
-            # Determine specific, high-quality title
+            # Determine specific, high-quality unique title
             title = ""
             h1 = soup.find("h1")
-            if h1 and h1.get_text().strip():
-                title = h1.get_text().strip()
-            elif soup.find("h2"):
-                h2 = soup.find("h2")
-                if h2 and h2.get_text().strip():
-                    title = h2.get_text().strip()
+            slug = urlparse(url).path.strip("/").replace(".php", "").replace("-", " ").title()
 
-            if not title and soup.title and soup.title.string:
-                title = soup.title.string.strip()
-
-            # If title is generic college name, generate from URL path slug
-            clean_title_lower = (title or "").lower()
-            if not title or "bms institute of technology" in clean_title_lower or clean_title_lower in ["bmsit", "bmsit&m", "home"]:
-                slug = urlparse(url).path.strip("/").replace(".php", "").replace("-", " ").title()
-                if slug:
-                    title = f"BMSIT {slug}"
+            if "placement" in slug.lower() and "contact" in slug.lower():
+                title = "BMSIT Placement Team Contact Details"
+            elif slug.lower() == "contact details":
+                title = "BMSIT College Main Office Contact Details"
+            elif h1 and h1.get_text().strip():
+                h1_txt = h1.get_text().strip()
+                if slug and slug.lower() not in h1_txt.lower():
+                    title = f"BMSIT {slug} - {h1_txt}"
                 else:
-                    title = "BMSIT Official Portal"
+                    title = f"BMSIT {h1_txt}"
+            elif slug:
+                title = f"BMSIT {slug}"
+            else:
+                title = "BMSIT Official Portal"
 
             # Clean main content from body
             body = soup.body
@@ -440,6 +476,10 @@ class WebsiteScraper:
             text = body.get_text(separator="\n")
             lines = [line.strip() for line in text.splitlines() if line.strip() and len(line.strip()) > 1]
             cleaned_text = "\n".join(lines)
+
+            # Append essential footer contact information if not already present in the page
+            if footer_contact_text and "Contact for Admissions" not in cleaned_text:
+                cleaned_text += footer_contact_text
 
             if len(cleaned_text) < 60:
                 return None

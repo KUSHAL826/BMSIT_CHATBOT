@@ -1302,10 +1302,17 @@ def trigger_scrape_now():
 
         }), 409
 
-    def background_task():
+    trigger_name = (
+        request.headers.get("X-Trigger")
+        or request.args.get("trigger")
+        or (request.get_json(silent=True) or {}).get("trigger")
+        or "Manual run"
+    )
 
+    def background_task():
         execute_bmsit_scrape_and_index(
-            is_scheduled=False
+            is_scheduled=(trigger_name != "Manual run"),
+            trigger_label=trigger_name
         )
 
     t = threading.Thread(

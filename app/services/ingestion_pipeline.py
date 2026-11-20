@@ -87,14 +87,17 @@ def _plan_slices(chunks_by_key):
     return slices, deferred, empty
 
 
-def run_website_delta_ingestion(is_scheduled=False):
+def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
     """Crawls the college website and embeds only what changed."""
     source_id = KnowledgeStore.WEBSITE_SOURCE_ID
     source_label = KnowledgeStore.WEBSITE_SOURCE_NAME
 
     settings = StorageService.load_settings()
     target_url = settings.get("bmsit_url", Config.BMSIT_DEFAULT_URL)
-    trigger = "Scheduled 7 AM IST" if is_scheduled else "Manual run"
+    if trigger_label:
+        trigger = trigger_label
+    else:
+        trigger = "Scheduled 7 AM IST" if is_scheduled else "Manual run"
 
     rag = RAGService.get_instance()
     provider = rag._embedder.active_provider_id()

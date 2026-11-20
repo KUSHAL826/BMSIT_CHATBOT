@@ -139,6 +139,7 @@ jobs:
             --retry-delay 5 \
             -X POST \
             -H "X-Admin-Key: ${ADMIN_PASSWORD}" \
+            -H "X-Trigger: GitHub Actions Workflow" \
             -H "Accept: application/json" \
             -o "$RESPONSE_FILE" \
             -w "%{http_code}" \
