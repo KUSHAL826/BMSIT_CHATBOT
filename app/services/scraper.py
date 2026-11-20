@@ -80,10 +80,24 @@ class WebsiteScraper:
         self.session = requests.Session()
         self.session.headers.update({
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 BMSIT-AI-Bot/1.0",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+            "Accept-Language": "en-US,en;q=0.9",
         })
 
+    def _is_internal_domain(self, target_url: str) -> bool:
+        """Returns True if the URL belongs to BMSIT internal domain or subdomains."""
+        if not target_url:
+            return False
+        parsed = urlparse(target_url)
+        netloc = parsed.netloc.lower().split(":")[0].removeprefix("www.")
+        return netloc == self.apex_domain or netloc.endswith("." + self.apex_domain)
+
     def _is_allowed_domain(self, target_url: str) -> bool:
+        """
+        Determines whether a URL is permitted for crawling and text extraction.
+        Allows BMSIT internal pages, IRINS faculty portals, and LinkedIn profiles.
+        Rejects malformed relative paths containing nested domains.
+        """
         if not target_url:
             return False
         parsed = urlparse(target_url)
@@ -94,7 +108,24 @@ class WebsiteScraper:
         path_lower = parsed.path.lower()
         if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
             return False
-        return netloc == self.apex_domain or netloc.endswith("." + self.apex_domain)
+
+        # 1. BMSIT internal domains & institutional subdomains
+        if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
+            return True
+
+        # 2. IRINS faculty & institutional portals (e.g. bmsit.irins.org, irins.org)
+        if "irins.org" in netloc:
+            return True
+
+        # 3. LinkedIn profiles linked from faculty / department pages
+        if "linkedin.com" in netloc:
+            return True
+
+        # 4. Academic research profiles
+        if any(prof in netloc for prof in ("orcid.org", "researchgate.net", "scholar.google")):
+            return True
+
+        return False
 
     def run_sync(self, keep_running_for_indexing=False):
         """
@@ -199,8 +230,8 @@ class WebsiteScraper:
                 scraped_pages[url] = page_data
                 scraper_status.pages_scraped = len(scraped_pages)
 
-                # Discover new links dynamically if depth allows
-                if depth < self.max_depth and len(queue) < 10000:
+                # Discover new links dynamically if depth allows (only from internal BMSIT domains)
+                if depth < self.max_depth and len(queue) < 10000 and self._is_internal_domain(url):
                     for link_item in page_data.get("links", []):
                         if isinstance(link_item, tuple):
                             link_url, link_anchor = link_item
@@ -374,10 +405,17 @@ class WebsiteScraper:
                 url, timeout=Config.SCRAPE_REQUEST_TIMEOUT, allow_redirects=True, stream=True
             )
             if resp.status_code != 200:
+                logger.debug("[Scraper] Skipping %s: HTTP status %s", url, resp.status_code)
                 return None
             
             content_type = (resp.headers.get("Content-Type") or "").lower()
             if "text/html" not in content_type:
+                return None
+
+            # Skip Cloudflare Turnstile / anti-bot challenge interstitial pages
+            resp_sample = resp.text[:1000].lower()
+            if "just a moment..." in resp_sample or "challenge-running" in resp_sample or "cf-turnstile" in resp_sample:
+                logger.warning("[Scraper] Anti-bot challenge detected on %s; skipping page.", url)
                 return None
 
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -453,7 +491,14 @@ class WebsiteScraper:
             h1 = soup.find("h1")
             slug = urlparse(url).path.strip("/").replace(".php", "").replace("-", " ").title()
 
-            if "placement" in slug.lower() and "contact" in slug.lower():
+            url_lower = url.lower()
+            if "linkedin.com" in url_lower:
+                page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
+                title = page_title or f"LinkedIn Profile - {slug}"
+            elif "irins.org" in url_lower:
+                page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
+                title = page_title or f"IRINS Faculty Profile - {slug}"
+            elif "placement" in slug.lower() and "contact" in slug.lower():
                 title = "BMSIT Placement Team Contact Details"
             elif slug.lower() == "contact details":
                 title = "BMSIT College Main Office Contact Details"
@@ -475,6 +520,16 @@ class WebsiteScraper:
 
             text = body.get_text(separator="\n")
             lines = [line.strip() for line in text.splitlines() if line.strip() and len(line.strip()) > 1]
+
+            # Strip generic LinkedIn login / sign-in / cookie barriers
+            if "linkedin.com" in url_lower:
+                strip_phrases = (
+                    "sign in to view", "sign in with email", "new to linkedin",
+                    "by clicking continue to join", "user agreement", "privacy policy",
+                    "cookie policy", "join now", "agree to linkedin", "skip to main content"
+                )
+                lines = [l for l in lines if not any(p in l.lower() for p in strip_phrases)]
+
             cleaned_text = "\n".join(lines)
 
             # Append essential footer contact information if not already present in the page

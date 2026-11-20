@@ -54,10 +54,18 @@ async function triggerScrapeNow() {
   const statusBox = document.getElementById("scraper-status-box");
   const statusMsg = document.getElementById("scraper-status-msg");
   const fillBar = document.getElementById("scraper-progress-fill");
+  const statusBar = document.getElementById("scraper-status-bar");
+  const liveBadge = document.getElementById("scraper-live-badge");
 
   btn.disabled = true;
   btn.innerHTML = `<span class="spinner">⏳</span> Scraping in Progress...`;
-  statusBox.classList.add("active");
+  if (statusBox) statusBox.classList.add("active");
+  if (statusBar) statusBar.style.display = "block";
+  if (liveBadge) {
+    liveBadge.textContent = "⏳ Crawling Active";
+    liveBadge.className = "status-badge";
+    liveBadge.style.color = "#38bdf8";
+  }
   statusMsg.textContent = "Starting BMSIT crawler...";
   fillBar.style.width = "15%";
 
@@ -92,8 +100,16 @@ function pollScrapeProgress() {
       const statusBox = document.getElementById("scraper-status-box");
       const statusMsg = document.getElementById("scraper-status-msg");
       const fillBar = document.getElementById("scraper-progress-fill");
+      const statusBar = document.getElementById("scraper-status-bar");
+      const liveBadge = document.getElementById("scraper-live-badge");
 
       if (status.is_running) {
+        if (statusBar) statusBar.style.display = "block";
+        if (liveBadge) {
+          liveBadge.textContent = "⏳ Crawling Active";
+          liveBadge.className = "status-badge";
+          liveBadge.style.color = "#38bdf8";
+        }
         statusMsg.textContent = status.status_message || "Processing...";
         let pct = 20;
         if (status.phase === "chunking") {
@@ -111,9 +127,17 @@ function pollScrapeProgress() {
         btn.innerHTML = "⚡ Scrape Now";
 
         if (status.error) {
+          if (liveBadge) {
+            liveBadge.textContent = "❌ Failed";
+            liveBadge.className = "status-badge status-failed";
+          }
           statusMsg.textContent = `Completed with error: ${status.error}`;
           showToast(`Scrape failed: ${status.error}`, "error");
         } else {
+          if (liveBadge) {
+            liveBadge.textContent = "● Completed";
+            liveBadge.className = "status-badge status-indexed";
+          }
           statusMsg.textContent = status.status_message || "Completed successfully!";
           showToast("Scraping and FAISS indexing completed!", "success");
           setTimeout(() => location.reload(), 1500);
@@ -132,11 +156,19 @@ async function pollStatusIfRunning() {
     if (status.is_running) {
       const btn = document.getElementById("btn-scrape-now");
       const statusBox = document.getElementById("scraper-status-box");
+      const statusBar = document.getElementById("scraper-status-bar");
+      const liveBadge = document.getElementById("scraper-live-badge");
       if (btn) {
         btn.disabled = true;
         btn.innerHTML = `<span class="spinner">⏳</span> Scraping in Progress...`;
       }
       if (statusBox) statusBox.classList.add("active");
+      if (statusBar) statusBar.style.display = "block";
+      if (liveBadge) {
+        liveBadge.textContent = "⏳ Crawling Active";
+        liveBadge.className = "status-badge";
+        liveBadge.style.color = "#38bdf8";
+      }
       pollScrapeProgress();
     }
   } catch (e) {}
