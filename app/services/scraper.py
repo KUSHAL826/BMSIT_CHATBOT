@@ -86,8 +86,7 @@ class WebsiteScraper:
 
     def _is_internal_domain(self, target_url: str) -> bool:
         """
-        Returns True if the URL belongs to BMSIT internal institutional domains
-        or affiliated campus platforms (including subdomains and trust portals).
+        Returns True ONLY if the URL belongs to BMSIT internal domain or subdomains (*.bmsit.ac.in).
         """
         if not target_url:
             return False
@@ -95,23 +94,15 @@ class WebsiteScraper:
         netloc = parsed.netloc.lower().split(":")[0].removeprefix("www.")
         if not netloc:
             return True
-        # BMSIT apex domain and all subdomains (e.g. staff.bmsit.ac.in, student.bmsit.ac.in, results.bmsit.ac.in)
-        if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
-            return True
-        # Parent trust and alumni portals (bmset.org, alumni.bmset.org)
-        if netloc == "bmset.org" or netloc.endswith(".bmset.org"):
-            return True
-        # Institutional IRINS faculty portal
-        if "irins.org" in netloc and "bmsit" in netloc:
-            return True
-        return False
+        return netloc == self.apex_domain or netloc.endswith("." + self.apex_domain)
 
     def _is_allowed_domain(self, target_url: str) -> bool:
         """
         Determines whether a URL is permitted for text crawling.
         Strictly allows ONLY:
-          1. BMSIT official pages and subdomains (*.bmsit.ac.in, bmsit.irins.org, bmset.org, alumni.bmset.org)
+          1. BMSIT official website and subdomains (*.bmsit.ac.in)
           2. Faculty LinkedIn profiles (linkedin.com/in/*)
+        NO IRINS, NO research portals, NO other portals, NO documents or photos.
         Rest of all external links are strictly excluded from scraping.
         """
         if not target_url:
@@ -123,7 +114,7 @@ class WebsiteScraper:
         if not netloc:
             return False
 
-        # Reject malformed URLs containing fake nested domain paths (e.g. /linkedin.com/, /bmsit.irins.org/)
+        # Reject malformed URLs containing fake nested domain paths (crawler traps)
         path_lower = parsed.path.lower()
         if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
             return False
@@ -132,21 +123,21 @@ class WebsiteScraper:
         if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
             return False
 
-        # 1. BMSIT internal domains & institutional subdomains
+        # Explicitly reject IRINS, research portals, or external trusts
+        if "irins" in netloc or "researchgate" in netloc or "bmset.org" in netloc:
+            return False
+
+        # 1. ONLY BMSIT domain and subdomains (bmsit.ac.in, staff.bmsit.ac.in, student.bmsit.ac.in, etc.)
         if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
             return True
-        if "bmsit" in netloc:
-            return True
-        if netloc == "bmset.org" or netloc.endswith(".bmset.org"):
-            return True
 
-        # 2. Faculty LinkedIn profiles
+        # 2. ONLY Faculty LinkedIn profiles (linkedin.com/in/*)
         if "linkedin.com" in netloc:
             if "/in/" in path_lower or "/pub/" in path_lower or len(path_lower.strip("/")) > 2:
                 return True
             return False
 
-        # Rest of all links must NOT be scraped!
+        # All other portals and links are strictly rejected
         return False
 
     def run_sync(self, keep_running_for_indexing=False):
@@ -543,12 +534,7 @@ class WebsiteScraper:
             if not self._is_internal_domain(url):
                 page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
                 netloc_name = urlparse(url).netloc.split(":")[0].removeprefix("www.")
-                if "linkedin.com" in url_lower:
-                    title = page_title or f"LinkedIn Profile - {slug or netloc_name}"
-                elif "irins.org" in url_lower:
-                    title = page_title or f"IRINS Faculty Profile - {slug or netloc_name}"
-                else:
-                    title = page_title or f"{netloc_name.title()} - {slug or 'Overview'}"
+                title = page_title or f"LinkedIn Profile - {slug or netloc_name}"
             elif "placement" in slug.lower() and "contact" in slug.lower():
                 title = "BMSIT Placement Team Contact Details"
             elif slug.lower() == "contact details":
