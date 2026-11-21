@@ -176,10 +176,15 @@ def _load_supabase_vectors_for_admin():
     except Exception as e:
         print(f"[Admin] Supabase fetch_all_chunks error: {e}")
 
-    # 3. Tertiary: Local chunks file (data/faiss_index/bmsit_chunks.json)
+    # 3. Tertiary: Local chunks file (data/index/chunks.json)
     try:
         from app.services.fsutil import read_json
-        chunks_file = getattr(Config, "CHUNKS_FILE", Config.FAISS_DIR / "bmsit_chunks.json")
+        index_dir = getattr(Config, "INDEX_DIR", Config.DATA_DIR / "index")
+        chunks_file = getattr(Config, "CHUNKS_FILE", index_dir / "chunks.json")
+        if not chunks_file.exists():
+            legacy_file = index_dir / "bmsit_chunks.json"
+            if legacy_file.exists():
+                chunks_file = legacy_file
         if chunks_file.exists():
             local_chunks = read_json(chunks_file, default=[])
             if isinstance(local_chunks, list) and local_chunks:

@@ -182,6 +182,8 @@ class Config:
     UPLOADS_DIR = DATA_DIR / "uploads"
     SCRAPED_DIR = DATA_DIR / "scraped"
     INDEX_DIR = DATA_DIR / "index"
+    FAISS_DIR = INDEX_DIR
+    CHUNKS_FILE = INDEX_DIR / "chunks.json"
     KNOWLEDGE_DIR = DATA_DIR / "knowledge"
     HISTORY_FILE = DATA_DIR / "history.json"
     SCRAPE_STATE_FILE = DATA_DIR / "scrape_state.json"
