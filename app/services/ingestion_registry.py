@@ -115,6 +115,58 @@ class IngestionRegistry:
         return stale
 
     @classmethod
+    def backfill_from_chunks(cls, chunks):
+        """
+        Backfills IngestionRegistry in-memory and on disk from an active chunk list
+        (e.g. loaded from Supabase or memory on container startup).
+        Guarantees delta change detection works accurately across ephemeral container restarts.
+        """
+        if not chunks:
+            return 0
+        with cls._lock:
+            data = cls.load()
+            stamp = now_ist_str()
+            count = 0
+            by_source_and_key = {}
+            for c in chunks:
+                sid = c.get("source_id") or "website"
+                key = c.get("item_key")
+                if not key:
+                    continue
+                by_source_and_key.setdefault((sid, key), []).append(c)
+
+            for (sid, key), c_list in by_source_and_key.items():
+                stype = c_list[0].get("source_type") or "website"
+                sname = c_list[0].get("source_name") or sid
+                source = cls._source(data, sid, stype, sname)
+                existing = source["items"].get(key)
+                if existing and existing.get("chunk_ids"):
+                    continue
+                c_hash = c_list[0].get("content_hash") or ""
+                provider = c_list[0].get("embed_provider") or "gemini:gemini-embedding-001"
+                c_ids = [c["chunk_id"] for c in c_list if c.get("chunk_id")]
+                t_count = sum(int(c.get("tokens", 0)) for c in c_list)
+                source["items"][key] = {
+                    "item_key": key,
+                    "title": c_list[0].get("source_name") or key,
+                    "content_hash": c_hash,
+                    "hash_algo": "sha256",
+                    "last_scraped": stamp,
+                    "last_embedded": stamp,
+                    "chunk_ids": c_ids,
+                    "chunk_count": len(c_ids),
+                    "token_count": t_count,
+                    "embed_provider": provider,
+                    "status": STATUS_INDEXED,
+                    "first_seen": stamp,
+                    "revision": 1,
+                }
+                count += 1
+            if count:
+                cls._save(data)
+            return count
+
+    @classmethod
     def decide_batch(cls, source_id, hashes, expected_provider=None):
         """
         Delta decision for many items using ONE registry read.

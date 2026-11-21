@@ -160,6 +160,13 @@ class RAGService:
             if repaired or loaded_from_supabase:
                 self._persist()
 
+            # Backfill IngestionRegistry from active chunks so delta detection works across restarts
+            try:
+                from app.services.ingestion_registry import IngestionRegistry
+                IngestionRegistry.backfill_from_chunks(chunks)
+            except Exception as e:
+                logger.warning("[RAG] Registry backfill warning: %s", e)
+
             logger.info(
                 "[RAG] Loaded %s chunks (Supabase: %s). Spaces: %s",
                 len(self._chunks), loaded_from_supabase, {p: len(v[1]) for p, v in self._spaces.items()},
@@ -273,6 +280,7 @@ class RAGService:
                 "tokens": piece["tokens"],
                 "context_header": context_header or "",
                 "metadata": meta,
+                "content_hash": meta.get("content_hash", ""),
                 "updated_at": meta["updated_at"],
                 "created_at": meta["created_at"],
             })

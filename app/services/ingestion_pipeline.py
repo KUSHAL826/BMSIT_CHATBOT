@@ -163,20 +163,44 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
         for url in changed:
             # If already present in vector store with matching content, DO NOT re-embed!
             if url in indexed_keys:
-                # Check registry content hash
+                # 1. Check registry content hash
                 reg_item = registry_items.get(url)
-                if reg_item and reg_item.get("content_hash") == hashes.get(url):
+                if reg_item and reg_item.get("content_hash") and reg_item.get("content_hash") == hashes.get(url):
                     final_unchanged.add(url)
                     reasons[url] = "already-indexed-registry-match"
                     continue
 
-                # Check stored knowledge text
+                # 2. Check stored knowledge text
                 stored_item = stored_items.get(url)
                 if stored_item:
                     prev_text = (stored_item.get("text") or "").strip()
                     if prev_text and content_hash(prev_text) == hashes.get(url):
                         final_unchanged.add(url)
                         reasons[url] = "already-indexed-unchanged"
+                        continue
+
+                # 3. Check live vectors directly from in-memory / Supabase chunks
+                live_chunks = [c for c in rag._chunks if c.get("item_key") == url]
+                if live_chunks:
+                    live_hash = live_chunks[0].get("content_hash") or (live_chunks[0].get("metadata") or {}).get("content_hash")
+                    if live_hash and live_hash == hashes.get(url):
+                        final_unchanged.add(url)
+                        reasons[url] = "already-indexed-live-hash-match"
+                        continue
+
+                    # Verify deterministic chunk IDs: identical page text yields identical chunk IDs
+                    new_test_chunks = rag.chunk_text(
+                        text=(pages.get(url, {}).get("content") or ""),
+                        source_id=source_id,
+                        source_name=(pages.get(url, {}).get("title") or url),
+                        source_type="website",
+                        item_key=url
+                    )
+                    new_ids = {c["chunk_id"] for c in new_test_chunks}
+                    live_ids = {c["chunk_id"] for c in live_chunks}
+                    if new_ids and new_ids == live_ids:
+                        final_unchanged.add(url)
+                        reasons[url] = "already-indexed-exact-chunks-match"
                         continue
 
             final_changed.append(url)
@@ -277,6 +301,7 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
                     "title": title,
                     "type": "web",
                     "is_document": False,
+                    "content_hash": hashes.get(url, ""),
                     "updated_at": now_ts,
                     "created_at": meta.get("created_at") or now_ts,
                 },
