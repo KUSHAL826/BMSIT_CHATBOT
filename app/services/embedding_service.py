@@ -158,12 +158,13 @@ class ApiKeyPool:
 
     def park_for_quota(self, state):
         with self._lock:
-            state["cooldown_until"] = time.time() + Config.EMBED_KEY_COOLDOWN
+            cooldown = min(120, int(getattr(Config, "EMBED_KEY_COOLDOWN", 60) or 60))
+            state["cooldown_until"] = time.time() + cooldown
             state["quota_hits"] += 1
         logger.warning(
-            "[Embeddings] Key %s is out of quota. Parked for %s minutes; "
+            "[Embeddings] Key %s rate limited. Pausing %ss for reset; "
             "%s of %s key(s) still usable.",
-            state["label"], Config.EMBED_KEY_COOLDOWN // 60,
+            state["label"], cooldown,
             self.available_count(), self.configured_count(),
         )
 
@@ -299,10 +300,11 @@ class GeminiEmbeddingBackend:
                 continue
 
             if response.status_code == 429:
-                if "quota" in response.text.lower():
-                    self.pool.park_for_quota(state)   # daily quota: move to next key
-                else:
-                    self.pool.park_briefly(state, 20)  # per-minute burst
+                logger.warning(
+                    "[Embeddings] Key %s rate limited (HTTP 429). Pausing 20s for RPM reset...",
+                    state["label"],
+                )
+                self.pool.park_briefly(state, 20)
                 continue
 
             if response.status_code in (500, 502, 503, 504):
