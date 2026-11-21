@@ -1,6 +1,12 @@
 name: Scheduled BMSIT Web Scrape & Ingestion
 
 on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '**.md'
+      - '.gitignore'
   schedule:
     # Every Friday at 12:43 PM IST (07:13 UTC)
     - cron: '13 7 * * 5'
@@ -76,12 +82,18 @@ jobs:
           echo "STEP 1: RENDER HEALTH CHECK"
           echo "=========================================="
           echo "Checking whether the Render application responds."
-          echo "A cold start may take time."
+          echo "A cold start or container deploy may take time."
+
+          # If triggered by a git push to main, give Render time to build and deploy
+          if [ "${{ github.event_name }}" = "push" ]; then
+            echo "Workflow triggered by git push to main. Waiting 90 seconds for Render to build and start new deployment..."
+            sleep 90
+          fi
 
           HTTP_CODE="000"
 
-          for ATTEMPT in 1 2 3 4 5; do
-            echo "Health check attempt $ATTEMPT/5..."
+          for ATTEMPT in $(seq 1 20); do
+            echo "Health check attempt $ATTEMPT/20..."
 
             HTTP_CODE=$(curl -sS \
               --connect-timeout 10 \
@@ -97,14 +109,14 @@ jobs:
 
             echo "Render response: HTTP $HTTP_CODE"
 
-            if [ "$ATTEMPT" -lt 5 ]; then
+            if [ "$ATTEMPT" -lt 20 ]; then
               echo "Waiting 15 seconds before retrying..."
               sleep 15
             fi
           done
 
           if [ "$HTTP_CODE" != "200" ]; then
-            echo "ERROR: Render did not return HTTP 200."
+            echo "ERROR: Render did not return HTTP 200 after 20 attempts."
             echo "The scraper will not be triggered."
             exit 1
           fi
@@ -150,7 +162,7 @@ jobs:
 
           echo "Scraper endpoint HTTP status: $HTTP_CODE"
 
-          if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]]; then
+          if [[ ! "$HTTP_CODE" =~ ^2[0-9][0-9]$ ]] && [ "$HTTP_CODE" != "409" ]; then
             echo "ERROR: Scraper start request was rejected or failed."
             echo "Response details (first 1000 characters):"
             head -c 1000 "$RESPONSE_FILE" || true
@@ -158,10 +170,14 @@ jobs:
             exit 1
           fi
 
-          echo "SUCCESS: The endpoint accepted the request."
-          echo "Start response (first 500 characters):"
-          head -c 500 "$RESPONSE_FILE" || true
-          echo ""
+          if [ "$HTTP_CODE" = "409" ]; then
+            echo "NOTE: Scraper job is already in progress on Render. Proceeding to monitor progress..."
+          else
+            echo "SUCCESS: The endpoint accepted the request."
+            echo "Start response (first 500 characters):"
+            head -c 500 "$RESPONSE_FILE" || true
+            echo ""
+          fi
 
           echo "The next step will verify actual scraper progress."
 

@@ -2,6 +2,7 @@ import hashlib
 import os
 import re
 import threading
+import time
 from pathlib import Path
 
 import requests
@@ -913,7 +914,7 @@ def _get_supabase_source_chunks(source_id):
 
 @admin_bp.before_request
 def require_admin_auth():
-    """Enforces password authentication on all admin pages and API endpoints."""
+    """Enforces password authentication and 20-minute inactivity session timeout on all admin pages and API endpoints."""
     if request.path in ("/admin/login", "/admin/logout"):
         return None
 
@@ -933,8 +934,26 @@ def require_admin_auth():
     if Config.ADMIN_PASSWORD:
         if not session.get("admin_authenticated"):
             if request.path.startswith("/api/admin"):
-                return jsonify({"error": "Unauthorized. Admin authentication required."}), 401
+                return jsonify({"error": "Unauthorized. Admin authentication required.", "session_expired": True}), 401
             return redirect(url_for("admin.login_page"))
+
+        # Session inactivity check (20-minute timeout control)
+        now = time.time()
+        last_activity = session.get("last_activity")
+        timeout_seconds = int(getattr(Config, "ADMIN_SESSION_TIMEOUT_MINUTES", 20) or 20) * 60
+
+        if last_activity is not None and (now - last_activity) > timeout_seconds:
+            session.clear()
+            if request.path.startswith("/api/admin"):
+                return jsonify({
+                    "error": "Session expired due to 20 minutes of inactivity. Please log in again.",
+                    "session_expired": True
+                }), 401
+            return redirect(url_for("admin.login_page", expired=1))
+
+        # Update last activity for page visits and real user API actions (automated background status polling excluded)
+        if request.path not in ("/api/admin/scrape/status", "/api/admin/status", "/api/admin/session"):
+            session["last_activity"] = now
 
 
 @admin_bp.route("/admin/login", methods=["GET", "POST"])
@@ -942,19 +961,55 @@ def login_page():
     if request.method == "POST":
         password = (request.form.get("password") or "").strip()
         if password == Config.ADMIN_PASSWORD:
+            session.clear()
             session["admin_authenticated"] = True
+            session["last_activity"] = time.time()
+            session.permanent = True
             return redirect("/admin")
         return render_template("admin_login.html", error="Invalid admin security password.")
 
+    if request.args.get("expired"):
+        session.clear()
+        return render_template("admin_login.html", error="Your admin session expired due to 20 minutes of inactivity. Please log in again.")
+
+    if request.args.get("logged_out"):
+        session.clear()
+        return render_template("admin_login.html", info="You have been safely logged out.")
+
     if session.get("admin_authenticated"):
+        now = time.time()
+        last_activity = session.get("last_activity")
+        timeout_seconds = int(getattr(Config, "ADMIN_SESSION_TIMEOUT_MINUTES", 20) or 20) * 60
+        if last_activity and (now - last_activity) > timeout_seconds:
+            session.clear()
+            return render_template("admin_login.html", error="Your admin session expired due to 20 minutes of inactivity. Please log in again.")
         return redirect("/admin")
+
     return render_template("admin_login.html")
 
 
 @admin_bp.route("/admin/logout")
 def logout():
-    session.pop("admin_authenticated", None)
-    return redirect(url_for("admin.login_page"))
+    session.clear()
+    if request.args.get("expired"):
+        return redirect(url_for("admin.login_page", expired=1))
+    return redirect(url_for("admin.login_page", logged_out=1))
+
+
+@admin_bp.route("/api/admin/session", methods=["GET"])
+def get_session_status():
+    """Returns remaining active session seconds and timeout configuration."""
+    if not session.get("admin_authenticated"):
+        return jsonify({"authenticated": False}), 401
+    now = time.time()
+    last_act = session.get("last_activity", now)
+    timeout = int(getattr(Config, "ADMIN_SESSION_TIMEOUT_MINUTES", 20) or 20) * 60
+    remaining = max(0, int(timeout - (now - last_act)))
+    return jsonify({
+        "authenticated": True,
+        "remaining_seconds": remaining,
+        "timeout_minutes": int(timeout / 60)
+    })
 
 
 # ============================================================

@@ -103,6 +103,15 @@
       font-size: 13px;
       margin-bottom: 20px;
     }
+    .info-msg {
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      color: #7dd3fc;
+      padding: 10px 14px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 20px;
+    }
     .public-link {
       margin-top: 24px;
       display: inline-block;
@@ -123,6 +132,9 @@
 
     {% if error %}
       <div class="error-msg">⚠️ {{ error }}</div>
+    {% endif %}
+    {% if info %}
+      <div class="info-msg">ℹ️ {{ info }}</div>
     {% endif %}
 
     <form method="POST" action="/admin/login">

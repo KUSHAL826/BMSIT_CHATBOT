@@ -61,11 +61,13 @@ services:
       - key: BMSIT_DEFAULT_URL
         value: https://bmsit.ac.in/
       - key: SCRAPE_DEPTH
-        value: "4"
+        value: "10"
       - key: SCRAPE_MAX_PAGES
-        value: "800"
+        value: "2500"
       - key: SCRAPE_MIN_PAGE_TOKENS
-        value: "80"
+        value: "0"
+      - key: AUTO_SCRAPE_ON_STARTUP
+        value: "true"
 
       # --- Supabase Vector Store ---
       - key: SUPABASE_URL

@@ -49,6 +49,7 @@ _SPEC = {
     "LOG_LEVEL": ("str", "INFO"),
     "SECRET_KEY": ("str", "bmsit-ai-secret-key-2026-supersecure"),
     "ADMIN_PASSWORD": ("str", "admin123"),
+    "ADMIN_SESSION_TIMEOUT_MINUTES": ("int", 20),
 
     # Crawler
     "BMSIT_DEFAULT_URL": ("str", "https://bmsit.ac.in/"),
@@ -58,6 +59,7 @@ _SPEC = {
     "SCRAPE_REQUEST_TIMEOUT": ("int", 0),
     "SCRAPE_DELAY": ("float", 0.05),
     "SCRAPE_MIN_PAGE_TOKENS": ("int", 0),
+    "AUTO_SCRAPE_ON_STARTUP": ("bool", True),
 
     # Scheduler
     "SCHEDULE_TIME": ("str", "07:00"),
@@ -214,6 +216,7 @@ class Config:
     SCRAPE_REQUEST_TIMEOUT = _get("SCRAPE_REQUEST_TIMEOUT")
     SCRAPE_DELAY = _get("SCRAPE_DELAY")
     SCRAPE_MIN_PAGE_TOKENS = _get("SCRAPE_MIN_PAGE_TOKENS")
+    AUTO_SCRAPE_ON_STARTUP = _get("AUTO_SCRAPE_ON_STARTUP")
 
     # ------------------------------------------------------------------
     # Scheduler

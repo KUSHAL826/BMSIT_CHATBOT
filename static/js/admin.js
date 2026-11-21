@@ -1,6 +1,7 @@
 // BMSIT College AI Agent - Admin Dashboard Controller
 
 document.addEventListener("DOMContentLoaded", () => {
+  initSessionControl();
   initScraperControls();
   initFileUploadDropzone();
   initDeleteHandlers();
@@ -818,5 +819,89 @@ function initWebsitePagination() {
 
   // Initial render
   render();
+}
+
+// -------------------------------------------------------------
+// Admin Session Control & 20-minute Inactivity Auto-Logout
+// -------------------------------------------------------------
+const INACTIVITY_TIMEOUT_MS = 20 * 60 * 1000; // 20 minutes
+let lastUserInteraction = Date.now();
+let isLoggingOut = false;
+
+function recordUserActivity() {
+  lastUserInteraction = Date.now();
+}
+
+function initSessionControl() {
+  const timerEl = document.getElementById("session-timer");
+
+  // Track user activity across interactions (debounced to avoid performance cost)
+  const activityEvents = ["mousedown", "mousemove", "keydown", "scroll", "touchstart", "click"];
+  let lastEventTime = 0;
+  activityEvents.forEach((evt) => {
+    window.addEventListener(
+      evt,
+      () => {
+        const now = Date.now();
+        if (now - lastEventTime > 1000) {
+          lastUserInteraction = now;
+          lastEventTime = now;
+        }
+      },
+      { passive: true }
+    );
+  });
+
+  // Update timer display and enforce automatic logout upon 20 minutes of inactivity
+  setInterval(() => {
+    if (isLoggingOut) return;
+    const elapsed = Date.now() - lastUserInteraction;
+    const remainingMs = Math.max(0, INACTIVITY_TIMEOUT_MS - elapsed);
+
+    if (timerEl) {
+      const minutes = Math.floor(remainingMs / 60000);
+      const seconds = Math.floor((remainingMs % 60000) / 1000);
+      timerEl.textContent = `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
+
+      // Visual warning colors as time counts down
+      if (remainingMs < 60000) {
+        timerEl.style.color = "#f87171"; // red (< 1m)
+      } else if (remainingMs < 300000) {
+        timerEl.style.color = "#fbbf24"; // amber (< 5m)
+      } else {
+        timerEl.style.color = "#38bdf8"; // default blue
+      }
+    }
+
+    if (remainingMs <= 0) {
+      isLoggingOut = true;
+      window.location.href = "/admin/logout?expired=1";
+    }
+  }, 1000);
+
+  // Global fetch interceptor: detect 401 Unauthorized (session expired on server)
+  const originalFetch = window.fetch;
+  window.fetch = async function (...args) {
+    recordUserActivity();
+    try {
+      const response = await originalFetch.apply(this, args);
+      if (response && response.status === 401 && !isLoggingOut) {
+        try {
+          const clone = response.clone();
+          const json = await clone.json().catch(() => ({}));
+          if (json.session_expired || window.location.pathname.startsWith("/admin")) {
+            isLoggingOut = true;
+            window.location.href = "/admin/login?expired=1";
+          }
+        } catch (_) {
+          isLoggingOut = true;
+          window.location.href = "/admin/login?expired=1";
+        }
+      }
+      return response;
+    } catch (err) {
+      throw err;
+    }
+  };
 }
 

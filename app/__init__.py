@@ -1,3 +1,4 @@
+from datetime import timedelta
 import logging
 import os
 import sys
@@ -47,6 +48,11 @@ def create_app():
     )
     app.config["SECRET_KEY"] = Config.SECRET_KEY
     app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024  # 64 MB upload ceiling
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(
+        minutes=int(getattr(Config, "ADMIN_SESSION_TIMEOUT_MINUTES", 20) or 20)
+    )
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 
     from app.routes.admin_routes import admin_bp
     from app.routes.chat_routes import chat_bp
@@ -75,5 +81,22 @@ def create_app():
             SchedulerService.start()
         except Exception as e:
             logging.getLogger(__name__).warning("Scheduler did not start: %s", e)
+
+        # Automated background delta scrape on server startup / container deployment
+        auto_scrape = getattr(Config, "AUTO_SCRAPE_ON_STARTUP", False)
+        if auto_scrape:
+            import threading
+            import time
+            from app.services.scheduler_service import execute_bmsit_scrape_and_index
+
+            def _background_startup_crawl():
+                time.sleep(15)  # allow web server to bind port and serve traffic first
+                try:
+                    logging.getLogger(__name__).info("[Startup] Initiating automated background delta scrape & embedding...")
+                    execute_bmsit_scrape_and_index(is_scheduled=True, trigger_label="Startup Auto-Crawl")
+                except Exception as ex:
+                    logging.getLogger(__name__).warning("[Startup] Auto-crawl error: %s", ex)
+
+            threading.Thread(target=_background_startup_crawl, daemon=True, name="StartupAutoCrawl").start()
 
     return app
