@@ -233,10 +233,18 @@ class RAGService:
 
     def source_item_keys(self, source_id):
         with self._lock:
-            return {
-                c.get("item_key") for c in self._chunks
-                if c.get("source_id") == source_id and c.get("item_key")
-            }
+            valid_sources = {str(source_id).strip()}
+            if str(source_id).strip() in ("web-bmsit", "website"):
+                valid_sources.update({"web-bmsit", "website"})
+            keys = set()
+            for c in self._chunks:
+                csid = str(c.get("source_id") or "").strip()
+                cstype = str(c.get("source_type") or "").strip().lower()
+                if csid in valid_sources or (source_id in ("web-bmsit", "website") and cstype in ("website", "web")):
+                    k = c.get("item_key") or (c.get("metadata") or {}).get("url")
+                    if k:
+                        keys.add(k)
+            return keys
 
     # ------------------------------------------------------------------
     # Chunking

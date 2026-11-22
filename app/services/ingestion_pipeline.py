@@ -56,16 +56,13 @@ def _plan_slices(chunks_by_key):
     changed pages, 0 embedded and only 85 deferred: the remainder produced no
     chunks and was silently dropped from the arithmetic.
     """
-    slice_target = max(1, Config.EMBED_COMMIT_SLICE_CHUNKS)
+    slice_target = min(50, max(1, Config.EMBED_COMMIT_SLICE_CHUNKS))
     run_cap = Config.EMBED_MAX_CHUNKS_PER_RUN or 0
-
-    # Biggest items first so one large page cannot be starved by the cap.
-    ordered = sorted(chunks_by_key.items(), key=lambda kv: len(kv[1]), reverse=True)
 
     slices, deferred, empty = [], [], []
     current, current_count, budget_used = [], 0, 0
 
-    for key, chunks in ordered:
+    for key, chunks in chunks_by_key.items():
         count = len(chunks)
         if not count:
             empty.append(key)
@@ -211,6 +208,12 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             reasons[url] = "vectors-missing"
             if url not in final_changed:
                 final_changed.append(url)
+
+        # CRITICAL RECOVERY: Ensure ANY page with usable text that is not active in vector store is embedded
+        for url in hashes:
+            if url not in indexed_keys and url not in final_changed:
+                final_changed.append(url)
+                reasons[url] = "missing-from-vector-store"
 
         unchanged = confirmed_unchanged
         changed = final_changed
