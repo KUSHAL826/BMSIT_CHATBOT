@@ -243,5 +243,191 @@ class TestDeduplicationLogic(unittest.TestCase):
             self.assertEqual(unchanged, [url], "Page must be in unchanged list")
 
 
+class TestUrlResolutionAndRedirectHandling(unittest.TestCase):
+    def setUp(self):
+        self.scraper = WebsiteScraper(base_url="https://bmsit.ac.in/")
+
+    def test_1_root_relative_url_resolution(self):
+        """Root-relative URL (/governence.php) must resolve against domain root."""
+        base_page = "https://bmsit.ac.in/faculty/new/index.php"
+        resolved = self.scraper._normalize_discovered_url("/governence.php", base_page)
+        self.assertEqual(resolved, "https://bmsit.ac.in/governence.php")
+
+    def test_2_relative_url_resolution_subfolder(self):
+        """Relative URL without leading slash inside subfolder must resolve within that subfolder."""
+        base_page = "https://bmsit.ac.in/faculty/new/index.php"
+        resolved = self.scraper._normalize_discovered_url("nba_approvals.php", base_page)
+        self.assertEqual(resolved, "https://bmsit.ac.in/faculty/new/nba_approvals.php")
+
+    def test_3_url_resolution_with_base_href(self):
+        """When HTML contains <base href="...">, relative URLs must resolve against that base URL."""
+        html_with_base = """
+        <html>
+        <head>
+            <base href="https://bmsit.ac.in/">
+            <title>Faculty Portal</title>
+        </head>
+        <body>
+            <a href="nba_approvals.php">NBA Approvals</a>
+        </body>
+        </html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.text = html_with_base
+        mock_resp.url = "https://bmsit.ac.in/faculty/new/index.php"
+        mock_resp.history = []
+
+        with patch.object(self.scraper.session, "get", return_value=mock_resp):
+            page_data = self.scraper._fetch_and_clean_page("https://bmsit.ac.in/faculty/new/index.php")
+
+        self.assertIsNotNone(page_data)
+        discovered = [u[0] for u in page_data["links"]]
+        self.assertIn("https://bmsit.ac.in/nba_approvals.php", discovered)
+
+    def test_4_valid_http_200_page(self):
+        """Valid HTTP 200 page must be cleanly fetched, parsed, and content returned."""
+        html_content = """
+        <html>
+        <head><title>Governance - BMSIT</title></head>
+        <body>
+            <h1>Board of Governors</h1>
+            <p>BMS Institute of Technology is governed by the BMSET Trust.</p>
+        </body>
+        </html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.text = html_content
+        mock_resp.url = "https://bmsit.ac.in/governence.php"
+        mock_resp.history = []
+
+        with patch.object(self.scraper.session, "get", return_value=mock_resp):
+            page_data = self.scraper._fetch_and_clean_page("https://bmsit.ac.in/governence.php")
+
+        self.assertIsNotNone(page_data)
+        self.assertEqual(page_data["url"], "https://bmsit.ac.in/governence.php")
+        self.assertIn("Board of Governors", page_data["content"])
+        self.assertIn("BMSET Trust", page_data["content"])
+
+    def test_5_non_homepage_redirecting_to_homepage_discarded(self):
+        """A non-homepage URL redirecting to homepage via HTTP 302 (soft-404) must return None and be discarded."""
+        mock_redirect_302 = MagicMock()
+        mock_redirect_302.status_code = 302
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.url = "https://bmsit.ac.in/"
+        mock_resp.history = [mock_redirect_302]
+        mock_resp.text = "<html><body><h1>Welcome to BMSIT Homepage</h1></body></html>"
+
+        with patch.object(self.scraper.session, "get", return_value=mock_resp):
+            page_data = self.scraper._fetch_and_clean_page("https://bmsit.ac.in/faculty/new/governence.php")
+
+        self.assertIsNone(page_data, "Soft-404 redirect to homepage must be discarded and return None")
+
+    def test_6_legitimate_redirect_to_valid_page(self):
+        """A legitimate redirect to another valid page must index under the canonical URL."""
+        mock_redirect_301 = MagicMock()
+        mock_redirect_301.status_code = 301
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.url = "https://bmsit.ac.in/dep-cse.php"
+        mock_resp.history = [mock_redirect_301]
+        mock_resp.text = "<html><body><h1>Computer Science Department</h1><p>Academic details...</p></body></html>"
+
+        with patch.object(self.scraper.session, "get", return_value=mock_resp):
+            page_data = self.scraper._fetch_and_clean_page("https://bmsit.ac.in/dept/cse-old.php")
+
+        self.assertIsNotNone(page_data)
+        self.assertEqual(page_data["url"], "https://bmsit.ac.in/dep-cse.php", "Must index under canonical URL")
+
+    def test_7_duplicate_url_discovery_across_attributes(self):
+        """Duplicate URLs discovered across <a>, data-url, onclick, and regex must be deduplicated."""
+        html_dupes = """
+        <html>
+        <head><title>Research Portal</title></head>
+        <body>
+            <a href="/research-centers.php">Research Centers</a>
+            <div data-url="/research-centers.php">More Info</div>
+            <button onclick="window.location.href='/research-centers.php'">Go to Research</button>
+            <script>
+                var target = "https://bmsit.ac.in/research-centers.php";
+            </script>
+        </body>
+        </html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.text = html_dupes
+        mock_resp.url = "https://bmsit.ac.in/research.php"
+        mock_resp.history = []
+
+        with patch.object(self.scraper.session, "get", return_value=mock_resp):
+            page_data = self.scraper._fetch_and_clean_page("https://bmsit.ac.in/research.php")
+
+        self.assertIsNotNone(page_data)
+        links = [u[0] for u in page_data["links"]]
+        self.assertEqual(links.count("https://bmsit.ac.in/research-centers.php"), 1, "Duplicate links must be deduplicated")
+
+    def test_8_legitimate_faculty_new_pages_remain_discoverable(self):
+        """Legitimate pages inside /faculty/new/ must not be disabled or excluded."""
+        faculty_new_url = "https://bmsit.ac.in/faculty/new/career.php"
+        self.assertTrue(self.scraper._is_allowed_domain(faculty_new_url), "Must allow /faculty/new/ pages")
+
+        html_faculty = """
+        <html>
+        <head><title>Careers - BMSIT Faculty</title></head>
+        <body>
+            <h1>Faculty Recruitment</h1>
+            <a href="nba_approvals.php">NBA Approvals</a>
+            <p>Application guidelines for assistant professor.</p>
+        </body>
+        </html>
+        """
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.headers = {"Content-Type": "text/html"}
+        mock_resp.text = html_faculty
+        mock_resp.url = faculty_new_url
+        mock_resp.history = []
+
+        with patch.object(self.scraper.session, "get", return_value=mock_resp):
+            page_data = self.scraper._fetch_and_clean_page(faculty_new_url)
+
+        self.assertIsNotNone(page_data)
+        self.assertEqual(page_data["url"], faculty_new_url)
+        discovered = [u[0] for u in page_data["links"]]
+        self.assertIn("https://bmsit.ac.in/faculty/new/nba_approvals.php", discovered)
+
+    def test_soft_404_purged_on_crawl_sync(self):
+        """Unreached pages that redirect to homepage (soft-404) must be marked DELETED and purged."""
+        old_pages = {
+            "https://bmsit.ac.in/faculty/new/governence.php": {
+                "title": "BMSIT Homepage",
+                "hash": "5aa2f0c4b89788b9f78ecc23e92c7edb",
+                "length": 1000
+            }
+        }
+        mock_probe = MagicMock()
+        mock_probe.status_code = 200
+        mock_probe.url = "https://bmsit.ac.in/"
+
+        with patch("app.services.storage.StorageService.load_scrape_state", return_value={"pages": old_pages}), \
+             patch("app.services.storage.StorageService.save_scrape_state"), \
+             patch("app.services.storage.StorageService.record_crawl_run"), \
+             patch.object(self.scraper, "_fetch_and_clean_page", return_value=None), \
+             patch.object(self.scraper.session, "get", return_value=mock_probe):
+            result = self.scraper.run_sync()
+
+        self.assertIn("https://bmsit.ac.in/faculty/new/governence.php", result.get("deleted_urls", []))
+
+
 if __name__ == "__main__":
     unittest.main()

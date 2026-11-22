@@ -188,10 +188,10 @@ class SupabaseService:
         """Deletes chunks belonging to source_id from Supabase."""
         if not self.is_enabled or not source_id:
             return 0
-        endpoint = f"{self.url}/rest/v1/{self.table}?source_id=eq.{source_id}"
+        endpoint = f"{self.url}/rest/v1/{self.table}"
         headers = self._headers()
         try:
-            res = requests.delete(endpoint, headers=headers, timeout=30)
+            res = requests.delete(endpoint, headers=headers, params={"source_id": f"eq.{source_id}"}, timeout=30)
             if res.status_code in (200, 204):
                 logger.info("[Supabase] Deleted source '%s' from Supabase.", source_id)
                 return True
@@ -205,10 +205,10 @@ class SupabaseService:
         """Deletes chunks belonging to item_key (e.g. scraped page URL) from Supabase."""
         if not self.is_enabled or not item_key:
             return False
-        endpoint = f"{self.url}/rest/v1/{self.table}?item_key=eq.{item_key}"
+        endpoint = f"{self.url}/rest/v1/{self.table}"
         headers = self._headers()
         try:
-            res = requests.delete(endpoint, headers=headers, timeout=30)
+            res = requests.delete(endpoint, headers=headers, params={"item_key": f"eq.{item_key}"}, timeout=30)
             if res.status_code in (200, 204):
                 logger.info("[Supabase] Deleted item_key '%s' from Supabase.", item_key)
                 return True
