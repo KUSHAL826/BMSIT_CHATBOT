@@ -5,6 +5,11 @@ on:
     # Every Friday at 12:43 PM IST (07:13 UTC)
     - cron: '13 7 * * 5'
   workflow_dispatch:
+    inputs:
+      reason:
+        description: 'Reason for manual scrape run'
+        required: false
+        default: 'Manual trigger from GitHub UI'
 
 permissions:
   contents: write

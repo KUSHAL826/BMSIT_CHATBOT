@@ -433,10 +433,26 @@ class RAGService:
         """
         supabase = SupabaseService.get_instance()
         
-        # Prevent duplicates: skip chunks whose chunk_id or exact text already exists under thread lock
+        replace_set = set(replace_keys or [])
+        stale_set = set(stale_chunk_ids or [])
+        removed = 0
+
+        # When pages are new/changed, remove their previous stale chunks so new embeddings can take their place
         with self._lock:
+            if replace_set or stale_set:
+                removed = self._drop(
+                    lambda c: c.get("item_key") in replace_set or c.get("chunk_id") in stale_set
+                )
             existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
             existing_digests = {self._dedupe_key(c) for c in self._chunks}
+
+        # Purge old vectors for updated pages from Supabase
+        if supabase.is_enabled and replace_set:
+            for rk in replace_set:
+                try:
+                    supabase.delete_item_key(rk)
+                except Exception as ex:
+                    logger.warning("[RAG] Supabase delete_item_key warning for %s: %s", rk, ex)
 
         filtered_chunks = []
         if new_chunks:
@@ -451,13 +467,6 @@ class RAGService:
         prepared, vectors = [], np.zeros((0, self._dim), dtype=np.float32)
         if filtered_chunks:
             prepared, vectors = self._prepare(filtered_chunks, progress_callback)
-
-        removed = 0
-        # Requirement: When new/changed pages are scraped, add their new embeddings/chunks
-        # to the existing Supabase vector store — never delete or replace previous chunks.
-        if not supabase.is_enabled and not replace_all:
-            # Only in non-Supabase strict local mode with explicit replacement:
-            pass  # Keep previous chunks preserved in all cases as required
 
         if supabase.is_enabled and prepared:
             supabase.insert_chunks(prepared, vectors)
