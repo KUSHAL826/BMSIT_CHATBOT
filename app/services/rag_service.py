@@ -663,14 +663,29 @@ class RAGService:
     # ------------------------------------------------------------------
     @classmethod
     def _expand_synonyms(cls, query):
-        """Dynamic retrieval relies on FAISS dense vector semantic space."""
-        return ""
+        """Dynamic acronym and synonym expansion for high-precision retrieval."""
+        q = (query or "").lower()
+        expansions = []
+        if re.search(r"\b(ip\s*cell|ipcell|ipc)\b", q):
+            expansions.append("intellectual property cell patents ipr")
+        if re.search(r"\b(idea\s*lab|aicte\s*lab)\b", q):
+            expansions.append("aicte idea development evaluation application lab")
+        if re.search(r"\bcoe\b", q):
+            expansions.append("controller of examinations autonomous")
+        return " ".join(expansions)
 
     @staticmethod
     def _query_stems(query):
+        # Pre-split compound tokens (e.g. ipcell -> ip cell, idealab -> idea lab)
+        normalized = re.sub(
+            r'\b([a-zA-Z]{2,6})(cell|lab|dept|block|exam|fees|seats)\b',
+            r'\1 \2',
+            query or "",
+            flags=re.IGNORECASE
+        )
         words = [
-            w.lower() for w in re.findall(r"\w+", query or "")
-            if w.lower() not in STOP_WORDS and (len(w) > 2 or w.isdigit())
+            w.lower() for w in re.findall(r"\w+", normalized)
+            if w.lower() not in STOP_WORDS and (len(w) >= 2 or w.isdigit())
         ]
         return [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in words]
 
@@ -782,8 +797,10 @@ class RAGService:
         def consider(position, dense_score):
             chunk = chunks[position]
             text_lower = chunk.get("text", "").lower()
+            meta = chunk.get("metadata") or {}
             title_lower = (
-                f"{chunk.get('source_name', '')} {(chunk.get('metadata') or {}).get('title', '')}"
+                f"{chunk.get('source_name', '')} {meta.get('title', '')} "
+                f"{meta.get('section_title', '')} {chunk.get('item_key', '')} {meta.get('url', '')}"
             ).lower()
 
             keyword_hits = sum(1 for stem in stems if re.search(r"\b" + re.escape(stem), text_lower))
@@ -809,17 +826,19 @@ class RAGService:
         if stems:
             for position, chunk in enumerate(chunks):
                 text_lower = chunk.get("text", "").lower()
+                meta = chunk.get("metadata") or {}
                 title_lower = (
-                    f"{chunk.get('source_name', '')} {(chunk.get('metadata') or {}).get('title', '')}"
+                    f"{chunk.get('source_name', '')} {meta.get('title', '')} "
+                    f"{meta.get('section_title', '')} {chunk.get('item_key', '')} {meta.get('url', '')}"
                 ).lower()
                 # Fast substring pre-check: skip chunks that don't match any stem before expensive regex
                 if not any(st in text_lower or st in title_lower for st in stems):
                     continue
                 keyword_hits = sum(1 for stem in stems if re.search(r"\b" + re.escape(stem), text_lower))
                 title_hits = sum(1 for stem in stems if stem in title_lower)
-                # Only consider if there is a dense hit, title match, or multiple keyword hits
+                # Only consider if there is a dense hit, title match, or keyword hits
                 dense_score = dense_scores.get(position, 0.0)
-                if dense_score > 0.0 or title_hits > 0 or keyword_hits >= 2 or (len(stems) == 1 and keyword_hits >= 1 and len(stems[0]) >= 4):
+                if dense_score > 0.0 or title_hits > 0 or keyword_hits >= 1:
                     consider(position, dense_score)
 
         ranked = sorted(candidates.values(), key=lambda c: c["score"], reverse=True)

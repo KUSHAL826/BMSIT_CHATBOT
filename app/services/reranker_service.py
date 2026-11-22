@@ -80,10 +80,18 @@ class RerankerService:
         - Penalty for short, boilerplate fragments
         """
         query_lower = query.lower()
-        # Pure dynamic tokens: words with length >= 3 or numbers (zero static word lists)
+        # Pre-split compound tokens (e.g. ipcell -> ip cell, idealab -> idea lab)
+        query_norm = re.sub(
+            r'\b([a-zA-Z]{2,6})(cell|lab|dept|block|exam|fees|seats)\b',
+            r'\1 \2',
+            query_lower,
+            flags=re.IGNORECASE
+        )
+        # Dynamic tokens: words with length >= 2 (excluding conversational stop words) or numbers
+        stop_words = {"the", "and", "for", "with", "what", "is", "are", "tell", "about", "give", "please"}
         raw_terms = [
-            w for w in re.findall(r"\w+", query_lower)
-            if len(w) >= 3 or w.isdigit()
+            w for w in re.findall(r"\w+", query_norm)
+            if (len(w) >= 2 and w not in stop_words) or w.isdigit()
         ]
         stems = [w[:-1] if (w.endswith("s") and not w.endswith("ss") and len(w) > 3) else w for w in raw_terms]
 
@@ -94,6 +102,8 @@ class RerankerService:
             source_name = str(chunk.get("source_name", "")).lower()
             metadata = chunk.get("metadata") or {}
             sec = str(metadata.get("section_title") or "").lower()
+            meta_title = str(metadata.get("title") or "").lower()
+            url_str = str(chunk.get("item_key") or metadata.get("url") or "").lower()
             initial_score = float(chunk.get("score", 0.0))
             dense_score = float(chunk.get("dense_score", initial_score))
 
@@ -113,8 +123,9 @@ class RerankerService:
             stem_coverage = len(matched_stems) / max(len(stems), 1)
             coverage_score = min(stem_coverage * 0.15, 0.15)
 
-            # 3. Title and section alignment
-            title_match = sum(1 for st in stems if st in source_name or st in sec)
+            # 3. Title, section, and URL alignment
+            title_combined = f"{source_name} {sec} {meta_title} {url_str}"
+            title_match = sum(1 for st in stems if st in title_combined)
             title_score = min(title_match * 0.05, 0.10)
 
             # 4. Numerical/factual presence (dynamically triggered if query or text contains digits or currency symbols)

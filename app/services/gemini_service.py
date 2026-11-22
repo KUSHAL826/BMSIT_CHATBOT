@@ -447,10 +447,17 @@ class GeminiService:
             return chunks[:top_k]
 
         q_lower = query.lower()
+        # Pre-split compound tokens (e.g. ipcell -> ip cell, idealab -> idea lab)
+        q_norm = re.sub(
+            r'\b([a-zA-Z]{2,6})(cell|lab|dept|block|exam|fees|seats)\b',
+            r'\1 \2',
+            q_lower,
+            flags=re.IGNORECASE
+        )
         stop_words = {"the", "and", "for", "with", "all", "need", "about", "tell", "list", "names", "what", "give", "please", "can", "you", "i", "how", "are", "is", "its"}
         raw_query_terms = [
-            t for t in re.findall(r"\b[a-zA-Z0-9_-]+\b", q_lower)
-            if len(t) >= 3 and not t.isdigit() and t not in stop_words
+            t for t in re.findall(r"\b[a-zA-Z0-9_-]+\b", q_norm)
+            if len(t) >= 2 and not t.isdigit() and t not in stop_words
         ]
         query_stems = [
             t[:-1] if (t.endswith("s") and not t.endswith("ss") and len(t) > 3) else t
@@ -466,10 +473,12 @@ class GeminiService:
             src_name = str(c.get("source_name", "")).lower()
             meta = c.get("metadata", {}) or {}
             sec = str(meta.get("section_title") or meta.get("page") or "").lower()
+            meta_title = str(meta.get("title") or "").lower()
+            url_str = str(c.get("item_key") or meta.get("url") or "").lower()
             text = str(c.get("text", "")).lower()
             score = float(c.get("score", 0.0))
 
-            title_combined = f"{src_name} {sec}"
+            title_combined = f"{src_name} {sec} {meta_title} {url_str}"
             title_hits = sum(1 for st in query_stems if (st in title_combined or (len(st) >= 4 and st[:4] in title_combined)))
             text_hits = sum(1 for st in query_stems if (st in text or (len(st) >= 4 and st[:4] in text)))
 
@@ -490,17 +499,13 @@ class GeminiService:
             title_hits = sc["title_hits"]
             text_hits = sc["text_hits"]
 
-            # When top chunk has strong query title alignment, prune chunks with ZERO title hits
-            # that also have weak text hits or significant score drop (cross-contaminating headers/other docs)
-            if max_title_hits >= 1 and title_hits == 0:
-                if max_text_hits >= 3 and text_hits < max(2, int(max_text_hits * 0.45)):
-                    continue
-                if top_score > 0.4 and score < (top_score * 0.60):
-                    continue
+            # Only prune zero title-hit chunks if they also have no text matches
+            if max_title_hits >= 1 and title_hits == 0 and text_hits == 0:
+                continue
 
             # Relative score threshold: discard chunks that drop by more than 50% from top chunk
-            # unless they have direct title alignment with the query
-            if top_score > 0.4 and score < (top_score * 0.50) and title_hits == 0:
+            # unless they have title alignment or direct text keyword hits
+            if top_score > 0.4 and score < (top_score * 0.50) and title_hits == 0 and text_hits == 0:
                 continue
 
             filtered.append(c)
@@ -784,10 +789,15 @@ ANSWER ({answer_guideline}):"""
             src_lower = source_title.lower()
             meta = c.get("metadata", {}) or {}
             sec = str(meta.get("section_title") or meta.get("page") or "").lower()
+            meta_title = str(meta.get("title") or "").lower()
+            url_str = str(c.get("item_key") or meta.get("url") or "").lower()
             ts_str = str(c.get("updated_at") or meta.get("updated_at") or "")
 
             # Title alignment check via dynamic substring and initialism
-            is_title_relevant = any(matches_title(st, src_lower) or matches_title(st, sec) for st in stems)
+            is_title_relevant = any(
+                matches_title(st, src_lower) or matches_title(st, sec) or matches_title(st, meta_title) or matches_title(st, url_str)
+                for st in stems
+            )
             is_top_chunk = (chunk_idx < 2)
 
             # Protect honorifics/abbreviations so names and titles are NEVER severed mid-sentence

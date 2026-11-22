@@ -40,9 +40,17 @@ class QueryRewriter:
         Rewrites conversational follow-up or shorthand queries into standalone search queries.
         Pure dynamic logic: zero predefined word lists or hardcoded dictionaries.
         """
-        clean_query = (query or "").strip()
+        clean_query = (query or "").strip().strip("'\"`’‘“”")
         if not clean_query:
             return clean_query
+
+        # Dynamically normalize concatenated compound entity terms (e.g. ipcell -> ip cell, idealab -> idea lab)
+        clean_query = re.sub(
+            r'\b([a-zA-Z]{2,6})(cell|lab|dept|block|exam|fees|seats)\b',
+            r'\1 \2',
+            clean_query,
+            flags=re.IGNORECASE
+        )
 
         # If there is no previous conversation history, the query is already standalone (0ms latency)
         if not messages or len(messages) < 2:

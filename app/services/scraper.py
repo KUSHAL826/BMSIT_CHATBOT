@@ -147,10 +147,6 @@ class WebsiteScraper:
         target_path = p.path.lower()
         target_netloc = p.netloc.lower().split(":")[0].removeprefix("www.")
 
-        # Canonicalize LinkedIn profile URLs: strip tracking query params (?utm_source=..., ?originalSubdomain=...)
-        if "linkedin.com" in target_netloc and ("/in/" in target_path or "/pub/" in target_path):
-            target = f"{p.scheme}://www.linkedin.com{p.path.rstrip('/')}"
-
         # Normalize trailing slash
         if "?" not in target:
             target = target.rstrip("/")
@@ -168,11 +164,9 @@ class WebsiteScraper:
     def _is_allowed_domain(self, target_url: str) -> bool:
         """
         Determines whether a URL is permitted for text crawling.
-        Strictly allows ONLY:
-          1. BMSIT official website and subdomains (*.bmsit.ac.in)
-          2. Faculty LinkedIn profiles (linkedin.com/in/*, linkedin.com/pub/*)
-        NO IRINS, NO research portals, NO other portals, NO documents or photos.
-        Rest of all external links are strictly excluded from scraping.
+        Strictly allows ONLY BMSIT official website and subdomains (*.bmsit.ac.in).
+        All external domains (including LinkedIn, IRINS, research portals, etc.)
+        are strictly excluded to guarantee lightning-fast crawl times and avoid anti-bot blocks.
         """
         if not target_url:
             return False
@@ -192,29 +186,14 @@ class WebsiteScraper:
         if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
             return False
 
-        # Explicitly reject IRINS, research portals, or external trusts
-        if "irins" in netloc or "researchgate" in netloc or "bmset.org" in netloc:
+        # Explicitly reject external portals, research networks, or trusts
+        if "irins" in netloc or "researchgate" in netloc or "bmset.org" in netloc or "linkedin.com" in netloc:
             return False
 
-        # 1. ONLY BMSIT domain and subdomains (bmsit.ac.in, staff.bmsit.ac.in, student.bmsit.ac.in, etc.)
+        # ONLY BMSIT domain and subdomains (bmsit.ac.in, staff.bmsit.ac.in, student.bmsit.ac.in, etc.)
         if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
             return True
 
-        # 2. ONLY Faculty LinkedIn profiles (linkedin.com/in/*, /pub/*)
-        if "linkedin.com" in netloc:
-            # Exclude non-profile pages like feeds, companies, jobs, login, search
-            non_profile_prefixes = (
-                "/feed", "/company", "/jobs", "/login", "/learning",
-                "/school", "/groups", "/pulse", "/posts", "/signup",
-                "/legal", "/help", "/messaging", "/mynetwork", "/notifications"
-            )
-            if any(path_lower.startswith(p) for p in non_profile_prefixes):
-                return False
-            if "/in/" in path_lower or "/pub/" in path_lower:
-                return True
-            return False
-
-        # All other portals and links are strictly rejected
         return False
 
     def run_sync(self, keep_running_for_indexing=False):
@@ -335,6 +314,17 @@ class WebsiteScraper:
             # 2. Probe unreached pages from previous crawl to detect DELETED pages
             for old_url, old_data in old_pages.items():
                 if old_url not in scraped_pages:
+                    # Immediately purge external or disallowed pages (e.g. legacy LinkedIn profiles)
+                    if not self._is_allowed_domain(old_url):
+                        detected_changes.append({
+                            "url": old_url,
+                            "title": old_data.get("title", "Disallowed Page"),
+                            "change_type": "DELETED",
+                            "summary": "External/disallowed page - purged from vector database"
+                        })
+                        deleted_urls.add(old_url)
+                        continue
+
                     try:
                         probe = self.session.get(old_url, timeout=self.request_timeout, allow_redirects=True, stream=True)
                         probe_final = probe.url or old_url
@@ -619,8 +609,8 @@ class WebsiteScraper:
                 for click_match in re.findall(r'(?:location\.href|window\.open|window\.location|href)\s*=\s*[\'"]([^\'"]+)[\'"]', onclick_val, re.I):
                     add_candidate(click_match, el.get_text().strip(), method="onclick")
 
-            # 6. Regex search in raw HTML for any full HTTP/HTTPS BMSIT or LinkedIn URLs
-            for full_match in re.findall(r'https?://(?:[a-zA-Z0-9\.\-]+\.)?(?:bmsit\.ac\.in|linkedin\.com)[^\s\'"<>]+', resp.text):
+            # 6. Regex search in raw HTML for any full HTTP/HTTPS BMSIT URLs
+            for full_match in re.findall(r'https?://(?:[a-zA-Z0-9\.\-]+\.)?bmsit\.ac\.in[^\s\'"<>]+', resp.text):
                 add_candidate(full_match, method="regex_full")
 
             # 7. Regex search in raw HTML for relative .php / .html routes
@@ -664,18 +654,35 @@ class WebsiteScraper:
             title = ""
             h1 = soup.find("h1")
             slug = urlparse(effective_url).path.strip("/").replace(".php", "").replace("-", " ").title()
+            slug_words = set(re.findall(r"\w+", slug.lower()))
 
-            url_lower = effective_url.lower()
-            if not self._is_internal_domain(effective_url):
-                page_title = soup.title.string.strip() if soup.title and soup.title.string else ""
-                netloc_name = urlparse(effective_url).netloc.split(":")[0].removeprefix("www.")
-                title = page_title or f"LinkedIn Profile - {slug or netloc_name}"
-            elif "placement" in slug.lower() and "contact" in slug.lower():
+            h1_txt = h1.get_text().strip() if h1 else ""
+            h1_words = set(re.findall(r"\w+", h1_txt.lower()))
+            overlap = slug_words.intersection(h1_words)
+
+            # Detect copy-paste template flaw: if <h1> has zero semantic overlap with the URL slug
+            # (e.g. <h1>Hostel Facilities</h1> on /idea-lab.php), find a matching heading in <h2>/<h3>
+            if h1 and not overlap and slug_words:
+                matched_subheading = None
+                for sub_h in soup.find_all(["h2", "h3"]):
+                    sub_txt = sub_h.get_text().strip()
+                    sub_words = set(re.findall(r"\w+", sub_txt.lower()))
+                    if slug_words.intersection(sub_words):
+                        matched_subheading = sub_txt
+                        break
+                if matched_subheading:
+                    logger.info("[Scraper] Detected template heading mismatch on %s: replacing '%s' with '%s'", effective_url, h1_txt, matched_subheading)
+                    h1.decompose()
+                    h1_txt = matched_subheading
+                else:
+                    h1.decompose()
+                    h1_txt = slug
+
+            if "placement" in slug.lower() and "contact" in slug.lower():
                 title = "BMSIT Placement Team Contact Details"
             elif slug.lower() == "contact details":
                 title = "BMSIT College Main Office Contact Details"
-            elif h1 and h1.get_text().strip():
-                h1_txt = h1.get_text().strip()
+            elif h1_txt:
                 if slug and slug.lower() not in h1_txt.lower():
                     title = f"BMSIT {slug} - {h1_txt}"
                 else:
@@ -692,16 +699,6 @@ class WebsiteScraper:
 
             text = body.get_text(separator="\n")
             lines = [line.strip() for line in text.splitlines() if line.strip() and len(line.strip()) > 1]
-
-            # Strip generic LinkedIn login / sign-in / cookie barriers
-            if "linkedin.com" in url_lower:
-                strip_phrases = (
-                    "sign in to view", "sign in with email", "new to linkedin",
-                    "by clicking continue to join", "user agreement", "privacy policy",
-                    "cookie policy", "join now", "agree to linkedin", "skip to main content"
-                )
-                lines = [l for l in lines if not any(p in l.lower() for p in strip_phrases)]
-
             cleaned_text = "\n".join(lines)
 
             # Append essential footer contact information if not already present in the page
