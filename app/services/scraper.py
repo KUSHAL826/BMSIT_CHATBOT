@@ -89,10 +89,13 @@ class WebsiteScraper:
     def request_timeout(self):
         """
         Request timeout for crawling and probing.
-        Returns None when SCRAPE_REQUEST_TIMEOUT is 0 or unset, imposing NO time limit.
+        Uses a resilient tuple (connect_timeout, read_timeout) to prevent dead links
+        or slow portals from hanging the crawler indefinitely.
         """
         val = Config.SCRAPE_REQUEST_TIMEOUT
-        return val if (val is not None and val > 0) else None
+        if val is not None and val > 0:
+            return (min(val, 6), val)
+        return (5, 12)
 
     def _is_internal_domain(self, target_url: str) -> bool:
         """
@@ -124,6 +127,7 @@ class WebsiteScraper:
         """
         Standards-compliant URL resolution and normalization.
         Resolves root-relative and relative URLs against current_page_url (or <base href>).
+        Normalizes www.bmsit.ac.in to bmsit.ac.in and enforces standard https scheme.
         """
         if not raw_href or not isinstance(raw_href, str):
             return None
@@ -133,6 +137,7 @@ class WebsiteScraper:
         if re.search(r'\s', raw_href) or raw_href.upper() in ("NIL", "NULL", "NONE"):
             return None
 
+        # Upgrade scheme-less domains (e.g. bmsit.ac.in/... or other domains)
         domain_without_scheme_re = re.compile(
             r'^(?:[a-zA-Z0-9-]+\.)+(?:com|org|net|edu|gov|in|io|co|ac\.in)(?:/|$)', re.I
         )
@@ -144,8 +149,27 @@ class WebsiteScraper:
             return None
 
         p = urlparse(target)
-        target_path = p.path.lower()
-        target_netloc = p.netloc.lower().split(":")[0].removeprefix("www.")
+        raw_netloc = p.netloc.lower().split(":")[0]
+        target_netloc = raw_netloc.removeprefix("www.")
+        target_path = p.path
+
+        # Reject malformed relative crawler traps containing fake nested domain paths
+        target_path_lower = target_path.lower()
+        if any(ext_dom in target_path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
+            return None
+
+        # Skip document files and media (strict rule: documents never loaded from website)
+        if any(target_path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
+            return None
+
+        # Reconstruct canonical target with standard https scheme for BMSIT
+        is_bmsit = (target_netloc == self.apex_domain or target_netloc.endswith("." + self.apex_domain))
+        scheme = "https" if is_bmsit else p.scheme.lower()
+
+        clean_path = target_path if target_path else "/"
+        target = f"{scheme}://{target_netloc}{clean_path}"
+        if p.query:
+            target += f"?{p.query}"
 
         # Normalize trailing slash
         if "?" not in target:
@@ -153,12 +177,6 @@ class WebsiteScraper:
         else:
             target = target.rstrip("/") if target.endswith("/") else target
 
-        # Reject malformed relative crawler traps
-        if any(ext_dom in target_path for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
-            return None
-        # Skip document files and media (strict rule)
-        if any(target_path.endswith(ext) for ext in self.SKIP_EXTENSIONS):
-            return None
         return target
 
     def _is_allowed_domain(self, target_url: str) -> bool:
@@ -166,7 +184,8 @@ class WebsiteScraper:
         Determines whether a URL is permitted for text crawling.
         Strictly allows ONLY BMSIT official website and subdomains (*.bmsit.ac.in).
         All external domains (including LinkedIn, IRINS, research portals, etc.)
-        are strictly excluded to guarantee lightning-fast crawl times and avoid anti-bot blocks.
+        and intranet login portals (SIMS staff/student, exam results) are excluded
+        to guarantee lightning-fast crawl times and avoid anti-bot blocks.
         """
         if not target_url:
             return False
@@ -186,11 +205,15 @@ class WebsiteScraper:
         if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
             return False
 
-        # Explicitly reject external portals, research networks, or trusts
-        if "irins" in netloc or "researchgate" in netloc or "bmset.org" in netloc or "linkedin.com" in netloc:
+        # Explicitly reject external portals, social media, research networks, or trusts
+        if any(d in netloc for d in ("irins", "researchgate", "bmset.org", "linkedin.com", "facebook.com", "x.com", "youtube.com", "instagram.com")):
             return False
 
-        # ONLY BMSIT domain and subdomains (bmsit.ac.in, staff.bmsit.ac.in, student.bmsit.ac.in, etc.)
+        # Exclude password-protected intranet/login portals and dead subdomains
+        if any(portal in netloc for portal in ("staff.bmsit.ac.in", "student.bmsit.ac.in", "results.bmsit.ac.in", "ieee.bmsit.ac.in")):
+            return False
+
+        # ONLY BMSIT domain and subdomains (bmsit.ac.in, projects.bmsit.ac.in, etc.)
         if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
             return True
 
