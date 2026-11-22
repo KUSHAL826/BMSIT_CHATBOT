@@ -67,7 +67,11 @@ services:
       - key: SCRAPE_MIN_PAGE_TOKENS
         value: "0"
       - key: AUTO_SCRAPE_ON_STARTUP
+        value: "false"
+      - key: ENABLE_CLOUD_SCHEDULER
         value: "true"
+      - key: SCHEDULE_TIME
+        value: "12:43"
 
       # --- Supabase Vector Store ---
       - key: SUPABASE_URL

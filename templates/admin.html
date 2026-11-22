@@ -133,15 +133,15 @@
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 12px;">
             <div style="background: rgba(0, 0, 0, 0.25); padding: 8px 10px; border-radius: 6px;">
               <span style="color: #94a3b8; display: block; font-size: 11px;">Scheduled Trigger:</span>
-              <span style="color: #38bdf8; font-weight: 600;">{{ sched_status.schedule or 'Daily at 07:00 (Asia/Kolkata)' }}</span>
+              <span style="color: #38bdf8; font-weight: 600;">{{ sched_status.schedule or 'Every Friday at 12:43 PM (Asia/Kolkata)' }}</span>
             </div>
             <div style="background: rgba(0, 0, 0, 0.25); padding: 8px 10px; border-radius: 6px;">
               <span style="color: #94a3b8; display: block; font-size: 11px;">Next Automated Run:</span>
-              <span style="color: #a78bfa; font-weight: 600;">{{ sched_status.next_run_time if sched_status.next_run_time != 'Not scheduled' else 'Daily 07:00 AM IST via GitHub Actions' }}</span>
+              <span style="color: #a78bfa; font-weight: 600;">{{ sched_status.next_run_time if sched_status.next_run_time != 'Not scheduled' else 'Every Friday at 12:43 PM (Asia/Kolkata)' }}</span>
             </div>
           </div>
           <div style="margin-top: 8px; font-size: 11px; color: #64748b; display: flex; align-items: center; gap: 6px;">
-            <span>🤖 Automated by <code>.github/workflows/scheduled_scrape.yml</code> + Cloud Cron</span>
+            <span>🤖 Automated by <code>.github/workflows/scheduled_scrape.yml</code> + Cloud Cron (Fridays 12:43 PM)</span>
           </div>
         </div>
 

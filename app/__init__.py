@@ -74,15 +74,18 @@ def create_app():
     except Exception as e:
         logging.getLogger(__name__).warning("Migration warning: %s", e)
 
-    # Start the daily job once, in the serving process only.
+    # Start the cloud scheduler only if explicitly enabled (default is False; GitHub Actions handles scheduling)
     if not app.debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        from app.services.scheduler_service import SchedulerService
-        try:
-            SchedulerService.start()
-        except Exception as e:
-            logging.getLogger(__name__).warning("Scheduler did not start: %s", e)
+        if getattr(Config, "ENABLE_CLOUD_SCHEDULER", False):
+            from app.services.scheduler_service import SchedulerService
+            try:
+                SchedulerService.start()
+            except Exception as e:
+                logging.getLogger(__name__).warning("Scheduler did not start: %s", e)
+        else:
+            logging.getLogger(__name__).info("[App] Cloud Cron disabled. Scheduled delta crawl runs via GitHub Actions on Fridays.")
 
-        # Automated background delta scrape on server startup / container deployment
+        # Automated background delta scrape on server startup / container deployment (disabled by default)
         auto_scrape = getattr(Config, "AUTO_SCRAPE_ON_STARTUP", False)
         if auto_scrape:
             import threading

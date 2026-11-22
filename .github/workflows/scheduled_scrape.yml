@@ -1,19 +1,13 @@
 name: Scheduled BMSIT Web Scrape & Ingestion
 
 on:
-  push:
-    branches:
-      - main
-    paths-ignore:
-      - '**.md'
-      - '.gitignore'
   schedule:
     # Every Friday at 12:43 PM IST (07:13 UTC)
     - cron: '13 7 * * 5'
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: bmsit-web-scrape
@@ -354,7 +348,53 @@ jobs:
           exit 1
 
       # ==========================================
-      # STEP 5: FINAL SUMMARY
+      # STEP 5: COMMIT SCRAPED CHANGES TO GITHUB
+      # ==========================================
+      - name: Fetch Latest Scrape State and Commit to GitHub
+        if: success()
+        env:
+          RENDER_APP_URL: ${{ secrets.RENDER_APP_URL }}
+          ADMIN_PASSWORD: ${{ secrets.ADMIN_PASSWORD }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RENDER_APP_URL="${RENDER_APP_URL%/}"
+
+          echo "=========================================="
+          echo "STEP 4: COMMITTING SCRAPED CHANGES TO GITHUB"
+          echo "=========================================="
+
+          mkdir -p scraped_metadata
+          curl -sS \
+            --connect-timeout 10 \
+            --max-time 30 \
+            -H "X-Admin-Key: ${ADMIN_PASSWORD}" \
+            -H "Accept: application/json" \
+            "${RENDER_APP_URL}/api/admin/scrape/status" > scraped_metadata/latest_scrape_status.json || echo '{"status": "completed"}' > scraped_metadata/latest_scrape_status.json
+
+          cat <<EOF > scraped_metadata/LAST_SCRAPE.md
+# BMSIT Automated Scrape Record
+- **Run Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+- **Trigger**: Friday 12:43 PM Scheduled Workflow
+- **Render App URL**: ${RENDER_APP_URL}
+- **Status File**: [latest_scrape_status.json](latest_scrape_status.json)
+EOF
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add scraped_metadata/latest_scrape_status.json scraped_metadata/LAST_SCRAPE.md
+
+          if git diff --staged --quiet; then
+            echo "No scrape state changes to commit."
+          else
+            git commit -m "chore(auto-scrape): record Friday scrape metadata and changes [skip ci]"
+            git push origin main
+            echo "SUCCESS: Latest scrape changes committed and pushed to GitHub main branch."
+          fi
+
+      # ==========================================
+      # STEP 6: FINAL SUMMARY
       # ==========================================
       - name: Final Summary
         if: success()

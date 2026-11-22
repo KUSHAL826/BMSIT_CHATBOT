@@ -59,10 +59,12 @@ _SPEC = {
     "SCRAPE_REQUEST_TIMEOUT": ("int", 0),
     "SCRAPE_DELAY": ("float", 0.05),
     "SCRAPE_MIN_PAGE_TOKENS": ("int", 0),
-    "AUTO_SCRAPE_ON_STARTUP": ("bool", True),
+    "AUTO_SCRAPE_ON_STARTUP": ("bool", False),
 
     # Scheduler
-    "SCHEDULE_TIME": ("str", "07:00"),
+    "ENABLE_CLOUD_SCHEDULER": ("bool", True),
+    "SCHEDULE_TIME": ("str", "12:43"),
+    "SCHEDULE_DAY": ("str", "friday"),
     "SCHEDULE_TIMEZONE": ("str", "Asia/Kolkata"),
 
     # Chunking
@@ -223,7 +225,9 @@ class Config:
     # ------------------------------------------------------------------
     # Scheduler
     # ------------------------------------------------------------------
+    ENABLE_CLOUD_SCHEDULER = _get("ENABLE_CLOUD_SCHEDULER")
     SCHEDULE_TIME = _get("SCHEDULE_TIME")
+    SCHEDULE_DAY = _get("SCHEDULE_DAY")
     SCHEDULE_TIMEZONE = _get("SCHEDULE_TIMEZONE")
 
     # ------------------------------------------------------------------
