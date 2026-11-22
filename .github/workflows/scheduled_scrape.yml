@@ -26,6 +26,12 @@ jobs:
 
     steps:
       # ==========================================
+      # STEP 0: CHECKOUT REPOSITORY
+      # ==========================================
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      # ==========================================
       # STEP 1: VALIDATE CONFIGURATION
       # ==========================================
       - name: Validate Configuration
