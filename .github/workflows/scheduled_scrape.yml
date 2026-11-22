@@ -378,13 +378,7 @@ jobs:
             -H "Accept: application/json" \
             "${RENDER_APP_URL}/api/admin/scrape/status" > scraped_metadata/latest_scrape_status.json || echo '{"status": "completed"}' > scraped_metadata/latest_scrape_status.json
 
-          cat <<EOF > scraped_metadata/LAST_SCRAPE.md
-# BMSIT Automated Scrape Record
-- **Run Date**: $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-- **Trigger**: Friday 12:43 PM Scheduled Workflow
-- **Render App URL**: ${RENDER_APP_URL}
-- **Status File**: [latest_scrape_status.json](latest_scrape_status.json)
-EOF
+          printf "# BMSIT Automated Scrape Record\n- **Run Date**: %%s\n- **Trigger**: Friday 12:43 PM Scheduled Workflow\n- **Render App URL**: %%s\n- **Status File**: [latest_scrape_status.json](latest_scrape_status.json)\n" "$(date -u +'%Y-%m-%d %H:%M:%S UTC')" "${RENDER_APP_URL}" > scraped_metadata/LAST_SCRAPE.md
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
