@@ -394,6 +394,7 @@ jobs:
             echo "No scrape state changes to commit."
           else
             git commit -m "chore(auto-scrape): record Friday scrape metadata and changes [skip ci]"
+            git pull --rebase origin main || true
             git push origin main
             echo "SUCCESS: Latest scrape changes committed and pushed to GitHub main branch."
           fi

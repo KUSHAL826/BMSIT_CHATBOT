@@ -289,8 +289,9 @@ class WebsiteScraper:
                 # Discover new links dynamically if depth allows (only from internal BMSIT domains)
                 if depth < self.max_depth and len(queue) < 50000 and self._is_internal_domain(actual_url):
                     for link_item in page_data.get("links", []):
-                        if isinstance(link_item, tuple):
-                            link_url, link_anchor = link_item
+                        if isinstance(link_item, (tuple, list)):
+                            link_url = link_item[0]
+                            link_anchor = link_item[1] if len(link_item) > 1 else ""
                         else:
                             link_url, link_anchor = link_item, ""
 
