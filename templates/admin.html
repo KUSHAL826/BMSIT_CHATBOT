@@ -1,19 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>BMSIT College AI Agent - Admin & Training Dashboard</title>
   <link rel="stylesheet" href="/static/css/admin.css">
 </head>
+
 <body>
   <div class="admin-container">
-    
+
     <!-- Top Header Navigation -->
     <header class="header">
       <div class="brand-section">
-        <a href="https://bmsit.ac.in" target="_blank" rel="noopener noreferrer" style="display: flex; align-items: center; text-decoration: none;" title="Visit BMSIT Official Website">
-          <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMSIT Logo" style="height: 48px; background: #ffffff; padding: 3px 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); object-fit: contain;" onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/bmsit-header.png') }}';">
+        <a href="https://bmsit.ac.in" target="_blank" rel="noopener noreferrer"
+          style="display: flex; align-items: center; text-decoration: none;" title="Visit BMSIT Official Website">
+          <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMSIT Logo"
+            style="height: 48px; background: #ffffff; padding: 3px 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); object-fit: contain;"
+            onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/bmsit-header.png') }}';">
         </a>
         <div class="brand-title">
           <h1>BMSIT AI Agent Admin & Training</h1>
@@ -21,7 +26,9 @@
         </div>
       </div>
       <div class="header-actions">
-        <span id="session-badge" class="badge" style="font-size: 13px; font-weight: 500; padding: 6px 12px; border-radius: 8px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; display: inline-flex; align-items: center; gap: 6px;" title="Auto-logout after 20 minutes of inactivity">
+        <span id="session-badge" class="badge"
+          style="font-size: 13px; font-weight: 500; padding: 6px 12px; border-radius: 8px; background: rgba(56, 189, 248, 0.12); border: 1px solid rgba(56, 189, 248, 0.3); color: #38bdf8; display: inline-flex; align-items: center; gap: 6px;"
+          title="Auto-logout after 20 minutes of inactivity">
           ⏱️ <span id="session-timer">20:00</span>
         </span>
         <button id="btn-open-settings" class="btn-secondary" title="Configure Gemini API Key">
@@ -86,48 +93,93 @@
 
     <!-- Main Grid: Scraper + Document Ingestion -->
     <main class="main-grid">
-      
+
       <!-- Left Panel: BMSIT Web Scraper & Change Detector -->
       <section class="panel">
         <div class="panel-header">
           <div>
             <h2 class="panel-title">🌐 BMSIT Website Knowledge Scraper</h2>
-            <p class="panel-desc">Scrapes BMSIT college web pages and faculty LinkedIn profiles (text only; documents, photos, and other external links excluded).</p>
+            <p class="panel-desc">Scrapes BMSIT college web pages and faculty LinkedIn profiles (text only; documents,
+              photos, and other external links excluded).</p>
           </div>
         </div>
 
         <div class="form-group">
           <label class="form-label" for="target-url-input">Target BMSIT College URL</label>
-          <input type="url" id="target-url-input" class="form-input" value="{{ settings.bmsit_url }}" placeholder="https://bmsit.ac.in/">
+          <input type="url" id="target-url-input" class="form-input" value="{{ settings.bmsit_url }}"
+            placeholder="https://bmsit.ac.in/">
         </div>
 
         <div class="form-row">
           <div class="form-group">
             <label class="form-label" for="max-pages-input">Max Pages to Crawl</label>
-            <input type="number" id="max-pages-input" class="form-input" value="{{ settings.scrape_max_pages }}" min="5" max="5000">
+            <input type="number" id="max-pages-input" class="form-input" value="{{ settings.scrape_max_pages }}" min="5"
+              max="5000">
           </div>
           <div class="form-group">
             <label class="form-label" for="max-depth-input">Crawl Depth</label>
-            <input type="number" id="max-depth-input" class="form-input" value="{{ settings.scrape_depth }}" min="1" max="25">
+            <input type="number" id="max-depth-input" class="form-input" value="{{ settings.scrape_depth }}" min="1"
+              max="25">
           </div>
         </div>
 
         <div class="scraper-action-row">
           <button id="btn-save-settings" class="btn-secondary">💾 Save Settings</button>
-          <button id="btn-scrape-now" class="btn-primary" style="background: linear-gradient(135deg, #0284c7, #06b6d4);">
+          <button id="btn-scrape-now" class="btn-primary"
+            style="background: linear-gradient(135deg, #0284c7, #06b6d4);">
             ⚡ Scrape Now
           </button>
         </div>
 
-        <!-- Live Crawling Engine Status & Progress -->
-        <div id="scraper-status-box" class="scraper-status-box" style="display: block; background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <span style="font-size: 11.5px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Crawling Status</span>
-            <span id="scraper-live-badge" class="status-badge status-indexed" style="font-size: 11px;">● Ready / Standby</span>
+        <!-- Scheduled Actions & Automated Web Scraping -->
+        <div class="scheduled-actions-card"
+          style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 15px;">⏰</span>
+              <strong style="font-size: 13px; color: #f1f5f9;">Scheduled Web Scraping Automation</strong>
+            </div>
+            <span
+              style="font-size: 11px; background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); padding: 2px 8px; border-radius: 12px; font-weight: 600;">
+              {% if sched_status.is_running %}● Active Cron{% else %}● GitHub Actions Active{% endif %}
+            </span>
           </div>
-          <div id="scraper-status-msg" style="font-size: 12.5px; font-weight: 500; color: #38bdf8;">Idle &mdash; Standby for next scheduled or manual delta crawl.</div>
-          <div class="status-bar" id="scraper-status-bar" style="display: none; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; margin-top: 8px;">
-            <div id="scraper-progress-fill" class="status-bar-fill" style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); transition: width 0.3s ease;"></div>
+          <div
+            style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; font-size: 12px;">
+            <div style="background: rgba(0, 0, 0, 0.25); padding: 8px 10px; border-radius: 6px;">
+              <span style="color: #94a3b8; display: block; font-size: 11px;">Scheduled Trigger:</span>
+              <span style="color: #38bdf8; font-weight: 600;">{{ sched_status.schedule or 'Every Friday at 12:43 PM
+                (Asia/Kolkata)' }}</span>
+            </div>
+            <div style="background: rgba(0, 0, 0, 0.25); padding: 8px 10px; border-radius: 6px;">
+              <span style="color: #94a3b8; display: block; font-size: 11px;">Next Automated Run:</span>
+              <span style="color: #a78bfa; font-weight: 600;">{{ sched_status.next_run_time if
+                sched_status.next_run_time != 'Not scheduled' else 'Every Friday at 12:43 PM (Asia/Kolkata)' }}</span>
+            </div>
+          </div>
+          <div style="margin-top: 8px; font-size: 11px; color: #64748b; display: flex; align-items: center; gap: 6px;">
+            <span>🤖 Automated by <code>.github/workflows/scheduled_scrape.yml</code> + Cloud Cron (Fridays 12:43
+              PM)</span>
+          </div>
+        </div>
+
+        <!-- Live Crawling Engine Status & Progress -->
+        <div id="scraper-status-box" class="scraper-status-box"
+          style="display: block; background: rgba(0, 0, 0, 0.28); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: var(--radius-sm); padding: 12px 14px; margin-top: 12px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span
+              style="font-size: 11.5px; font-weight: 600; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Crawling
+              Status</span>
+            <span id="scraper-live-badge" class="status-badge status-indexed" style="font-size: 11px;">● Ready /
+              Standby</span>
+          </div>
+          <div id="scraper-status-msg" style="font-size: 12.5px; font-weight: 500; color: #38bdf8;">Idle &mdash; Standby
+            for next scheduled or manual delta crawl.</div>
+          <div class="status-bar" id="scraper-status-bar"
+            style="display: none; height: 6px; background: rgba(255, 255, 255, 0.1); border-radius: 3px; overflow: hidden; margin-top: 8px;">
+            <div id="scraper-progress-fill" class="status-bar-fill"
+              style="width: 0%; height: 100%; background: linear-gradient(90deg, #38bdf8, #818cf8); transition: width 0.3s ease;">
+            </div>
           </div>
         </div>
 
@@ -140,70 +192,75 @@
             </span>
             <span style="color: #94a3b8; font-size: 11.5px;">
               {% if top_crawls and top_crawls|length > 0 %}
-                {{ top_crawls[0].timestamp }}
+              {{ top_crawls[0].timestamp }}
               {% else %}
-                {{ scrape_state.last_scrape or 'Never' }}
+              {{ scrape_state.last_scrape or 'Never' }}
               {% endif %}
             </span>
           </div>
 
           <div class="crawl-history-list" id="crawl-history-container">
             {% if top_crawls and top_crawls|length > 0 %}
-              {% set crawl = top_crawls[0] %}
-              <div class="crawl-run-item" style="border: 1px solid rgba(59, 130, 246, 0.25); background: rgba(15, 23, 42, 0.65);">
-                <div class="crawl-run-header">
-                  <div class="crawl-run-meta">
-                    <span class="crawl-run-index" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa;">Latest Run</span>
-                    <span class="crawl-badge {% if crawl.status == 'success' %}badge-success{% elif crawl.status == 'no_change' %}badge-info{% elif crawl.status == 'partial' %}badge-warning{% else %}badge-danger{% endif %}">
-                      {{ crawl.status_label or (crawl.status|upper) }}
-                    </span>
-                    <span class="crawl-trigger-tag" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">
-                      {{ crawl.trigger or 'Manual run' }}
-                    </span>
-                  </div>
-                  <span class="crawl-run-time" style="color: #94a3b8; font-weight: 500;">{{ crawl.timestamp }}</span>
+            {% set crawl = top_crawls[0] %}
+            <div class="crawl-run-item"
+              style="border: 1px solid rgba(59, 130, 246, 0.25); background: rgba(15, 23, 42, 0.65);">
+              <div class="crawl-run-header">
+                <div class="crawl-run-meta">
+                  <span class="crawl-run-index" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa;">Latest
+                    Run</span>
+                  <span
+                    class="crawl-badge {% if crawl.status == 'success' %}badge-success{% elif crawl.status == 'no_change' %}badge-info{% elif crawl.status == 'partial' %}badge-warning{% else %}badge-danger{% endif %}">
+                    {{ crawl.status_label or (crawl.status|upper) }}
+                  </span>
+                  <span class="crawl-trigger-tag"
+                    style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.3);">
+                    {{ crawl.trigger or 'Manual run' }}
+                  </span>
                 </div>
+                <span class="crawl-run-time" style="color: #94a3b8; font-weight: 500;">{{ crawl.timestamp }}</span>
+              </div>
 
-                <div class="crawl-run-summary" style="margin-top: 10px; font-size: 13px;">
-                  <span><strong>{{ crawl.pages_crawled|default(0) }}</strong> pages crawled</span>
-                  <span class="crawl-sep">&bull;</span>
-                  <span><strong>{{ crawl.chunks_active|default(0) }}</strong> active chunks in RAG</span>
-                  {% if crawl.changes_count is defined and crawl.changes_count > 0 %}
-                    <span class="crawl-sep">&bull;</span>
-                    <span class="crawl-changes-alert">{{ crawl.changes_count }} change(s) detected</span>
+              <div class="crawl-run-summary" style="margin-top: 10px; font-size: 13px;">
+                <span><strong>{{ crawl.pages_crawled|default(0) }}</strong> pages crawled</span>
+                <span class="crawl-sep">&bull;</span>
+                <span><strong>{{ crawl.chunks_active|default(0) }}</strong> active chunks in RAG</span>
+                {% if crawl.changes_count is defined and crawl.changes_count > 0 %}
+                <span class="crawl-sep">&bull;</span>
+                <span class="crawl-changes-alert">{{ crawl.changes_count }} change(s) detected</span>
+                {% endif %}
+              </div>
+
+              {% if crawl.summary %}
+              <div class="crawl-run-note" style="margin-top: 8px; color: #94a3b8; font-size: 12px; line-height: 1.5;">
+                {{ crawl.summary }}
+              </div>
+              {% endif %}
+
+              {% if crawl.changes and crawl.changes|length > 0 %}
+              <div class="crawl-run-changes" style="margin-top: 10px; max-height: 160px; overflow-y: auto;">
+                {% for c in crawl.changes %}
+                <div class="change-item" style="font-size: 12px; padding: 4px 0;">
+                  {% if c.change_type == 'NEW' %}
+                  <span class="tag-new">NEW</span>
+                  {% elif c.change_type == 'MODIFIED' %}
+                  <span class="tag-mod">MODIFIED</span>
+                  {% else %}
+                  <span class="tag-del">DELETED</span>
+                  {% endif %}
+                  <span style="font-weight: 500; color: #f1f5f9;">{{ c.title }}</span>
+                  {% if c.summary %}
+                  <span style="color: #94a3b8;">- {{ c.summary }}</span>
                   {% endif %}
                 </div>
-
-                {% if crawl.summary %}
-                  <div class="crawl-run-note" style="margin-top: 8px; color: #94a3b8; font-size: 12px; line-height: 1.5;">
-                    {{ crawl.summary }}
-                  </div>
-                {% endif %}
-
-                {% if crawl.changes and crawl.changes|length > 0 %}
-                  <div class="crawl-run-changes" style="margin-top: 10px; max-height: 160px; overflow-y: auto;">
-                    {% for c in crawl.changes %}
-                      <div class="change-item" style="font-size: 12px; padding: 4px 0;">
-                        {% if c.change_type == 'NEW' %}
-                          <span class="tag-new">NEW</span>
-                        {% elif c.change_type == 'MODIFIED' %}
-                          <span class="tag-mod">MODIFIED</span>
-                        {% else %}
-                          <span class="tag-del">DELETED</span>
-                        {% endif %}
-                        <span style="font-weight: 500; color: #f1f5f9;">{{ c.title }}</span>
-                        {% if c.summary %}
-                          <span style="color: #94a3b8;">- {{ c.summary }}</span>
-                        {% endif %}
-                      </div>
-                    {% endfor %}
-                  </div>
-                {% endif %}
+                {% endfor %}
               </div>
+              {% endif %}
+            </div>
             {% else %}
-              <div class="crawl-empty-state">
-                <span>No crawl history recorded yet. Trigger via <strong>GitHub Actions</strong> or click <strong>⚡ Scrape Now</strong> above.</span>
-              </div>
+            <div class="crawl-empty-state">
+              <span>No crawl history recorded yet. Trigger via <strong>GitHub Actions</strong> or click <strong>⚡ Scrape
+                  Now</strong> above.</span>
+            </div>
             {% endif %}
           </div>
         </div>
@@ -219,17 +276,20 @@
         </div>
 
         {% if not supabase_enabled %}
-          <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
-            <span>⚠️</span>
-            <span><strong>Cloud Persistence Note:</strong> Supabase credentials (SUPABASE_URL &amp; SUPABASE_KEY) are not set. On free cloud hosts like Render, uploaded files require Supabase to persist permanently across container spin-downs.</span>
-          </div>
+        <div
+          style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 12px; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
+          <span>⚠️</span>
+          <span><strong>Cloud Persistence Note:</strong> Supabase credentials (SUPABASE_URL &amp; SUPABASE_KEY) are not
+            set. On free cloud hosts like Render, uploaded files require Supabase to persist permanently across
+            container spin-downs.</span>
+        </div>
         {% endif %}
 
         <div id="dropzone" class="dropzone">
           <div class="dropzone-icon">📥</div>
           <div class="dropzone-title">Click or Drag & Drop Documents Here</div>
           <div class="dropzone-sub">Files will be parsed, chunked, and embedded into FAISS automatically</div>
-          
+
           <div class="supported-badge-row">
             <span class="format-pill">PDF</span>
             <span class="format-pill">DOCX</span>
@@ -255,28 +315,33 @@
     <!-- SECTION 1: 🌐 Website Scraping Knowledge Base -->
     <!-- ======================================================== -->
     <section class="history-section" style="margin-bottom: 28px;">
-      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+      <div class="panel-header"
+        style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
         <div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 22px;">🌐</span>
             <h2 class="panel-title" style="margin: 0;">Website Scraping Knowledge Base</h2>
           </div>
           <p class="panel-desc" style="margin-top: 6px;">
-            Individual web pages crawled from the BMSIT college website. Each page is tracked with its title, URL, and indexed vector chunks.
+            Individual web pages crawled from the BMSIT college website. Each page is tracked with its title, URL, and
+            indexed vector chunks.
           </p>
         </div>
         <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-          <div style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #38bdf8; font-weight: 600;">
+          <div
+            style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #38bdf8; font-weight: 600;">
             📄 {{ website_pages|length }} Page(s) Scraped
           </div>
-          <div style="background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #c084fc; font-weight: 600;">
+          <div
+            style="background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #c084fc; font-weight: 600;">
             🧩 {{ website_chunks_count }} Web Chunks Active
           </div>
         </div>
       </div>
 
       <!-- Controls Bar: Page Info & Search Box -->
-      <div class="website-controls-bar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+      <div class="website-controls-bar"
+        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
         <div style="display: flex; align-items: center; gap: 10px;">
           <span style="font-size: 13px; color: #94a3b8;" id="website-page-info">
             Showing all indexed pages and document chunks (10 per page)
@@ -287,8 +352,10 @@
           <!-- Real-Time Search Box -->
           <div class="search-box-wrapper" style="min-width: 280px;">
             <span class="search-box-icon">🔍</span>
-            <input type="text" id="website-search-input" class="search-box-input" placeholder="Search pages, titles, or URLs..." autocomplete="off">
-            <button type="button" id="btn-clear-search" class="search-clear-btn" style="display: none;" title="Clear search">✕</button>
+            <input type="text" id="website-search-input" class="search-box-input"
+              placeholder="Search pages, titles, or URLs..." autocomplete="off">
+            <button type="button" id="btn-clear-search" class="search-clear-btn" style="display: none;"
+              title="Clear search">✕</button>
           </div>
         </div>
       </div>
@@ -308,52 +375,64 @@
           </thead>
           <tbody id="website-flat-tbody">
             {% if website_pages %}
-              {% for page in website_pages %}
-                <tr id="page-row-{{ page.id }}" class="website-item-row" data-title="{{ page.title|lower }}" data-url="{{ (page.url or '')|lower }}">
-                  <td>
-                    <div style="display: flex; flex-direction: column; gap: 4px;">
-                      <div style="font-weight: 600; color: #f1f5f9; font-size: 13.5px; display: flex; align-items: center; gap: 8px;">
-                        <span class="badge-type badge-{{ page.file_type|default('web') }}">{{ page.file_type|upper|default('WEB') }}</span>
-                        <span>{{ page.title }}</span>
-                      </div>
-                      {% if page.url %}
-                        <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" style="color: #60a5fa; font-size: 11.5px; text-decoration: none; word-break: break-all; opacity: 0.85;" title="Open college page in new tab">
-                          {{ page.url }} ↗
-                        </a>
-                      {% endif %}
-                    </div>
-                  </td>
-                  <td><strong>{{ page.chunk_count }}</strong></td>
-                  <td>
-                    <span class="status-badge status-{{ page.status|lower|replace(' ', '-') }}">
-                      ● {{ page.status }}
-                    </span>
-                  </td>
-                  <td><span style="font-size: 12px; color: #94a3b8;">{{ page.date }}</span></td>
-                  <td><span style="font-size: 12px; color: #94a3b8;">{{ page.changes or (page.chars ~ ' chars') if page.chars else 'Indexed' }}</span></td>
-                  <td style="text-align: right;">
-                    <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end;">
-                      <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;" data-id="{{ page.id }}" data-file="{{ page.title }}" data-url="{{ page.url }}" data-type="website_page" title="View Scraped Content">
-                        👁️ View
-                      </button>
-                      {% if page.url %}
-                        <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="padding: 6px 10px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center;" title="Open external page">
-                          ↗ Visit
-                        </a>
-                      {% endif %}
-                      <button class="btn-delete btn-delete-source" data-id="{{ page.id }}" data-name="{{ page.title }}" title="Delete this page from vector index">
-                        🗑️ Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              {% endfor %}
+            {% for page in website_pages %}
+            <tr id="page-row-{{ page.id }}" class="website-item-row" data-title="{{ page.title|lower }}"
+              data-url="{{ (page.url or '')|lower }}">
+              <td>
+                <div style="display: flex; flex-direction: column; gap: 4px;">
+                  <div
+                    style="font-weight: 600; color: #f1f5f9; font-size: 13.5px; display: flex; align-items: center; gap: 8px;">
+                    <span class="badge-type badge-{{ page.file_type|default('web') }}">{{
+                      page.file_type|upper|default('WEB') }}</span>
+                    <span>{{ page.title }}</span>
+                  </div>
+                  {% if page.url %}
+                  <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer"
+                    style="color: #60a5fa; font-size: 11.5px; text-decoration: none; word-break: break-all; opacity: 0.85;"
+                    title="Open college page in new tab">
+                    {{ page.url }} ↗
+                  </a>
+                  {% endif %}
+                </div>
+              </td>
+              <td><strong>{{ page.chunk_count }}</strong></td>
+              <td>
+                <span class="status-badge status-{{ page.status|lower|replace(' ', '-') }}">
+                  ● {{ page.status }}
+                </span>
+              </td>
+              <td><span style="font-size: 12px; color: #94a3b8;">{{ page.date }}</span></td>
+              <td><span style="font-size: 12px; color: #94a3b8;">{{ page.changes or (page.chars ~ ' chars') if
+                  page.chars else 'Indexed' }}</span></td>
+              <td style="text-align: right;">
+                <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end;">
+                  <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;"
+                    data-id="{{ page.id }}" data-file="{{ page.title }}" data-url="{{ page.url }}"
+                    data-type="website_page" title="View Scraped Content">
+                    👁️ View
+                  </button>
+                  {% if page.url %}
+                  <a href="{{ page.url }}" target="_blank" rel="noopener noreferrer" class="btn-secondary"
+                    style="padding: 6px 10px; font-size: 12px; text-decoration: none; display: inline-flex; align-items: center;"
+                    title="Open external page">
+                    ↗ Visit
+                  </a>
+                  {% endif %}
+                  <button class="btn-delete btn-delete-source" data-id="{{ page.id }}" data-name="{{ page.title }}"
+                    title="Delete this page from vector index">
+                    🗑️ Delete
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
             {% else %}
-              <tr>
-                <td colspan="6" style="text-align: center; color: #64748b; padding: 36px 16px;">
-                  🌐 No website pages scraped yet. Click <strong>⚡ Scrape Now</strong> above to start crawling the BMSIT website.
-                </td>
-              </tr>
+            <tr>
+              <td colspan="6" style="text-align: center; color: #64748b; padding: 36px 16px;">
+                🌐 No website pages scraped yet. Click <strong>⚡ Scrape Now</strong> above to start crawling the BMSIT
+                website.
+              </td>
+            </tr>
             {% endif %}
           </tbody>
         </table>
@@ -362,7 +441,9 @@
       <!-- Pagination Controls (Page 1, 2, 3...) -->
       <div id="website-pagination-container" class="pagination-container">
         <div style="font-size: 13px; color: #94a3b8;">
-          Showing <span id="pag-start" style="color: #f1f5f9; font-weight: 600;">1</span> to <span id="pag-end" style="color: #f1f5f9; font-weight: 600;">10</span> of <span id="pag-total" style="color: #38bdf8; font-weight: 600;">{{ website_pages|length }}</span> entries
+          Showing <span id="pag-start" style="color: #f1f5f9; font-weight: 600;">1</span> to <span id="pag-end"
+            style="color: #f1f5f9; font-weight: 600;">10</span> of <span id="pag-total"
+            style="color: #38bdf8; font-weight: 600;">{{ website_pages|length }}</span> entries
         </div>
         <div class="pagination-buttons" id="pagination-buttons-wrap">
           <!-- Dynamically populated page buttons: Prev, 1, 2, 3..., Next -->
@@ -374,28 +455,33 @@
     <!-- SECTION 2: 📄 Uploaded Documents Knowledge Base -->
     <!-- ======================================================== -->
     <section class="history-section">
-      <div class="panel-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
+      <div class="panel-header"
+        style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
         <div>
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 22px;">📄</span>
             <h2 class="panel-title" style="margin: 0;">Document Uploads Knowledge Base</h2>
           </div>
           <p class="panel-desc" style="margin-top: 6px;">
-            Institutional documents uploaded by college administrators (PDF, DOCX, DOC, CSV). Files are split into semantic sections and vectorized into RAG.
+            Institutional documents uploaded by college administrators (PDF, DOCX, DOC, CSV). Files are split into
+            semantic sections and vectorized into RAG.
           </p>
         </div>
         <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-          <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #34d399; font-weight: 600;">
+          <div
+            style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #34d399; font-weight: 600;">
             📁 {{ document_sources|length }} Document(s) Uploaded
           </div>
-          <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #fbbf24; font-weight: 600;">
+          <div
+            style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #fbbf24; font-weight: 600;">
             🧩 {{ document_chunks_count }} Document Chunks Active
           </div>
-          <div style="background: {% if supabase_enabled %}rgba(16, 185, 129, 0.12){% else %}rgba(245, 158, 11, 0.15){% endif %}; border: 1px solid {% if supabase_enabled %}rgba(16, 185, 129, 0.3){% else %}rgba(245, 158, 11, 0.35){% endif %}; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: {% if supabase_enabled %}#34d399{% else %}#fbbf24{% endif %}; font-weight: 600;">
+          <div
+            style="background: {% if supabase_enabled %}rgba(16, 185, 129, 0.12){% else %}rgba(245, 158, 11, 0.15){% endif %}; border: 1px solid {% if supabase_enabled %}rgba(16, 185, 129, 0.3){% else %}rgba(245, 158, 11, 0.35){% endif %}; padding: 6px 14px; border-radius: 20px; font-size: 12px; color: {% if supabase_enabled %}#34d399{% else %}#fbbf24{% endif %}; font-weight: 600;">
             {% if supabase_enabled %}
-              ⚡ Storage: Persistent (Supabase)
+            ⚡ Storage: Persistent (Supabase)
             {% else %}
-              💾 Storage: Local
+            💾 Storage: Local
             {% endif %}
           </div>
         </div>
@@ -415,40 +501,44 @@
           </thead>
           <tbody id="document-table-body">
             {% if document_sources %}
-              {% for doc in document_sources %}
-                <tr id="history-row-{{ doc.id }}">
-                  <td>
-                    <div class="source-cell">
-                      <span class="badge-type badge-{{ doc.file_type }}">{{ doc.file_type|upper }}</span>
-                      <span style="font-weight: 600;">{{ doc.source }}</span>
-                    </div>
-                  </td>
-                  <td><span style="font-size: 12px; color: #94a3b8;">{{ doc.date }}</span></td>
-                  <td>
-                    <span class="status-badge status-{{ doc.status|lower|replace(' ', '-') }}">
-                      ● {{ doc.status }}
-                    </span>
-                  </td>
-                  <td><strong>{{ doc.chunk_count }}</strong></td>
-                  <td><span style="font-size: 12px; color: #94a3b8;">{{ doc.changes }}</span></td>
-                  <td style="text-align: right;">
-                    <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end;">
-                      <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;" data-id="{{ doc.id }}" data-file="{{ doc.source }}" data-type="document" title="View Document Content">
-                        👁️ View
-                      </button>
-                      <button class="btn-delete btn-delete-source" data-id="{{ doc.id }}" data-name="{{ doc.source }}" title="Delete document and its vectors">
-                        🗑️ Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              {% endfor %}
+            {% for doc in document_sources %}
+            <tr id="history-row-{{ doc.id }}">
+              <td>
+                <div class="source-cell">
+                  <span class="badge-type badge-{{ doc.file_type }}">{{ doc.file_type|upper }}</span>
+                  <span style="font-weight: 600;">{{ doc.source }}</span>
+                </div>
+              </td>
+              <td><span style="font-size: 12px; color: #94a3b8;">{{ doc.date }}</span></td>
+              <td>
+                <span class="status-badge status-{{ doc.status|lower|replace(' ', '-') }}">
+                  ● {{ doc.status }}
+                </span>
+              </td>
+              <td><strong>{{ doc.chunk_count }}</strong></td>
+              <td><span style="font-size: 12px; color: #94a3b8;">{{ doc.changes }}</span></td>
+              <td style="text-align: right;">
+                <div style="display: inline-flex; gap: 8px; align-items: center; justify-content: flex-end;">
+                  <button class="btn-secondary btn-view-doc" style="padding: 6px 10px; font-size: 12px;"
+                    data-id="{{ doc.id }}" data-file="{{ doc.source }}" data-type="document"
+                    title="View Document Content">
+                    👁️ View
+                  </button>
+                  <button class="btn-delete btn-delete-source" data-id="{{ doc.id }}" data-name="{{ doc.source }}"
+                    title="Delete document and its vectors">
+                    🗑️ Delete
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
             {% else %}
-              <tr>
-                <td colspan="6" style="text-align: center; color: #64748b; padding: 32px 16px;">
-                  📄 No uploaded documents found. Drag & drop PDF, Word, or CSV files into the upload area above to index them.
-                </td>
-              </tr>
+            <tr>
+              <td colspan="6" style="text-align: center; color: #64748b; padding: 32px 16px;">
+                📄 No uploaded documents found. Drag & drop PDF, Word, or CSV files into the upload area above to index
+                them.
+              </td>
+            </tr>
             {% endif %}
           </tbody>
         </table>
@@ -458,43 +548,55 @@
   </div>
 
   <!-- Document Viewer Modal (PDF / Documents) -->
-  <div id="doc-viewer-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(8px);">
-    <div style="background: #111a2e; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; width: 92%; max-width: 960px; height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px rgba(0,0,0,0.7);">
-      <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); background: #0c1424;">
+  <div id="doc-viewer-modal"
+    style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center; backdrop-filter: blur(8px);">
+    <div
+      style="background: #111a2e; border: 1px solid rgba(255,255,255,0.15); border-radius: 16px; width: 92%; max-width: 960px; height: 85vh; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 25px 50px rgba(0,0,0,0.7);">
+      <div
+        style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); background: #0c1424;">
         <div style="display: flex; align-items: center; gap: 10px;">
           <span style="font-size: 20px;">📄</span>
           <h3 id="doc-modal-title" style="font-size: 15px; font-weight: 600; color: #fff;">Document Viewer</h3>
         </div>
         <div style="display: flex; align-items: center; gap: 12px;">
-          <a id="doc-modal-external-link" href="#" target="_blank" class="btn-secondary" style="padding: 6px 12px; font-size: 12px;">
+          <a id="doc-modal-external-link" href="#" target="_blank" class="btn-secondary"
+            style="padding: 6px 12px; font-size: 12px;">
             ↗ Open in New Tab
           </a>
-          <button id="btn-close-doc-modal" style="background: none; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; padding: 4px 8px;">✕</button>
+          <button id="btn-close-doc-modal"
+            style="background: none; border: none; color: #94a3b8; font-size: 20px; cursor: pointer; padding: 4px 8px;">✕</button>
         </div>
       </div>
       <div style="flex: 1; background: #070d1e; position: relative; overflow: hidden;">
         <iframe id="doc-viewer-iframe" style="width: 100%; height: 100%; border: none;" src=""></iframe>
-        <div id="doc-viewer-text-container" style="display: none; width: 100%; height: 100%; overflow-y: auto; padding: 28px 32px; box-sizing: border-box; color: #f1f5f9; font-family: var(--font-main); line-height: 1.7;"></div>
+        <div id="doc-viewer-text-container"
+          style="display: none; width: 100%; height: 100%; overflow-y: auto; padding: 28px 32px; box-sizing: border-box; color: #f1f5f9; font-family: var(--font-main); line-height: 1.7;">
+        </div>
       </div>
     </div>
   </div>
 
   <!-- Settings / Gemini API Key Modal -->
-  <div id="settings-modal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 999; align-items: center; justify-content: center; backdrop-filter: blur(6px);">
-    <div style="background: #111a2e; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; width: 90%; max-width: 520px; padding: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
+  <div id="settings-modal"
+    style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 999; align-items: center; justify-content: center; backdrop-filter: blur(6px);">
+    <div
+      style="background: #111a2e; border: 1px solid rgba(255,255,255,0.1); border-radius: 16px; width: 90%; max-width: 520px; padding: 28px; box-shadow: 0 20px 40px rgba(0,0,0,0.6);">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
         <h3 style="font-size: 18px; font-weight: 700;">⚙️ Gemini API Configuration</h3>
-        <button id="btn-close-settings" style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;">✕</button>
+        <button id="btn-close-settings"
+          style="background: none; border: none; color: #94a3b8; font-size: 18px; cursor: pointer;">✕</button>
       </div>
       <p style="font-size: 13px; color: #94a3b8; margin-bottom: 16px;">
-        Configure your Google Gemini API key. Stored securely in <code>.env</code> on the server and never exposed to the frontend.
+        Configure your Google Gemini API key. Stored securely in <code>.env</code> on the server and never exposed to
+        the frontend.
       </p>
       <div class="form-group">
         <label class="form-label" for="gemini-api-key-input">Gemini API Key</label>
         <input type="password" id="gemini-api-key-input" class="form-input" placeholder="AIzaSy...">
       </div>
       <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px;">
-        <button onclick="document.getElementById('settings-modal').style.display='none'" class="btn-secondary">Cancel</button>
+        <button onclick="document.getElementById('settings-modal').style.display='none'"
+          class="btn-secondary">Cancel</button>
         <button id="btn-save-key" class="btn-primary">Save & Apply</button>
       </div>
     </div>
@@ -502,4 +604,5 @@
 
   <script src="/static/js/admin.js"></script>
 </body>
+
 </html>
