@@ -30,6 +30,8 @@ jobs:
       # ==========================================
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       # ==========================================
       # STEP 1: VALIDATE CONFIGURATION
@@ -138,7 +140,7 @@ jobs:
           set -euo pipefail
 
           RENDER_APP_URL="${RENDER_APP_URL%/}"
-          SCRAPE_URL="${RENDER_APP_URL}/api/admin/scrape"
+          SCRAPE_URL="${RENDER_APP_URL}/api/admin/scrape?force=true"
           RESPONSE_FILE="$(mktemp)"
 
           trap 'rm -f "$RESPONSE_FILE"' EXIT
@@ -388,14 +390,16 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main || true
+          git checkout main || true
+          git pull --rebase origin main || true
           git add scraped_metadata/latest_scrape_status.json scraped_metadata/LAST_SCRAPE.md
 
           if git diff --staged --quiet; then
             echo "No scrape state changes to commit."
           else
             git commit -m "chore(auto-scrape): record Friday scrape metadata and changes [skip ci]"
-            git pull --rebase origin main || true
-            git push origin main
+            git push origin main || (git pull --rebase origin main && git push origin main)
             echo "SUCCESS: Latest scrape changes committed and pushed to GitHub main branch."
           fi
 

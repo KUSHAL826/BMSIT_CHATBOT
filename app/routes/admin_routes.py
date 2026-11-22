@@ -550,6 +550,7 @@ def _get_persistent_website_knowledge():
         print(f"[Admin] KnowledgeStore website read error: {e}")
 
     # 2. Local RAG Chunks (FAISS) - primary source of verified embedded chunks
+    page_chunk_ids = {}
     try:
         rag = RAGService.get_instance()
         with rag._lock:
@@ -558,27 +559,28 @@ def _get_persistent_website_knowledge():
                 sid = str(chunk.get("source_id") or "")
                 if st in ("website", "web", "scrape") or sid == KnowledgeStore.WEBSITE_SOURCE_ID:
                     url = chunk.get("item_key") or (chunk.get("metadata") or {}).get("url")
-                    if url and url in pages_map:
-                        pages_map[url]["chunk_count"] += 1
-                    elif url:
-                        pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
-                        title = _clean_page_title((chunk.get("metadata") or {}).get("title"), url)
-                        pages_map[url] = {
-                            "id": pid,
-                            "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
-                            "item_key": url,
-                            "url": url,
-                            "title": title,
-                            "source": title,
-                            "source_type": "website",
-                            "file_type": "web",
-                            "status": "Indexed",
-                            "chunk_count": 1,
-                            "date": now_ist_str(),
-                            "chars": len(chunk.get("text", "")),
-                            "changes": "Indexed chunk",
-                            "text": chunk.get("text", ""),
-                        }
+                    cid = chunk.get("chunk_id") or f"{url}::{len(page_chunk_ids.setdefault(url, set()))}"
+                    if url:
+                        page_chunk_ids.setdefault(url, set()).add(cid)
+                        if url not in pages_map:
+                            pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+                            title = _clean_page_title((chunk.get("metadata") or {}).get("title"), url)
+                            pages_map[url] = {
+                                "id": pid,
+                                "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
+                                "item_key": url,
+                                "url": url,
+                                "title": title,
+                                "source": title,
+                                "source_type": "website",
+                                "file_type": "web",
+                                "status": "Indexed",
+                                "chunk_count": 0,
+                                "date": now_ist_str(),
+                                "chars": len(chunk.get("text", "")),
+                                "changes": "Indexed chunk",
+                                "text": chunk.get("text", ""),
+                            }
     except Exception as e:
         print(f"[Admin] RAG chunks read error: {e}")
 
@@ -593,9 +595,9 @@ def _get_persistent_website_knowledge():
                 if not url and str(row.get("source_name", "")).startswith("http"):
                     url = str(row.get("source_name"))
                 if url:
-                    if url in pages_map:
-                        pages_map[url]["chunk_count"] += 1
-                    else:
+                    cid = row.get("id") or row.get("chunk_id") or f"{url}::{len(page_chunk_ids.setdefault(url, set()))}"
+                    page_chunk_ids.setdefault(url, set()).add(cid)
+                    if url not in pages_map:
                         pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
                         title = _clean_page_title((row.get("metadata") or {}).get("title"), url)
                         pages_map[url] = {
@@ -608,7 +610,7 @@ def _get_persistent_website_knowledge():
                             "source_type": "website",
                             "file_type": "web",
                             "status": "Indexed",
-                            "chunk_count": 1,
+                            "chunk_count": 0,
                             "date": "Persistent (Supabase)",
                             "chars": len(row.get("text", "") or ""),
                             "changes": "Stored in Supabase",
@@ -616,6 +618,10 @@ def _get_persistent_website_knowledge():
                         }
     except Exception as e:
         print(f"[Admin] Supabase website pages read error: {e}")
+
+    # Assign deduplicated chunk count to each page
+    for url, p in pages_map.items():
+        p["chunk_count"] = len(page_chunk_ids.get(url, set()))
 
     # STRICT FILTER: Show ONLY pages that are both scraped AND successfully embedded into the vector database
     pages = [p for p in pages_map.values() if p.get("chunk_count", 0) > 0]
@@ -1323,10 +1329,17 @@ def trigger_scrape_now():
         or "Manual run"
     )
 
+    force_flag = (
+        str(request.args.get("force", "")).lower() in ("true", "1", "yes")
+        or str((request.get_json(silent=True) or {}).get("force", "")).lower() in ("true", "1", "yes")
+        or request.headers.get("X-Force") == "true"
+    )
+
     def background_task():
         execute_bmsit_scrape_and_index(
             is_scheduled=(trigger_name != "Manual run"),
-            trigger_label=trigger_name
+            trigger_label=trigger_name,
+            force=force_flag
         )
 
     t = threading.Thread(

@@ -167,23 +167,22 @@ class IngestionRegistry:
             return count
 
     @classmethod
-    def decide_batch(cls, source_id, hashes, expected_provider=None):
+    def decide_batch(cls, source_id, hashes, expected_provider=None, valid_vector_keys=None):
         """
         Delta decision for many items using ONE registry read.
 
         `hashes` maps item_key -> fresh content hash.
+        `valid_vector_keys` (optional) is a set of item keys confirmed present
+        in the live vector database (Supabase / FAISS). Any item absent from this
+        set is treated as missing vectors and flagged for embedding.
         Returns (needs_work, skip, reasons) where reasons maps key -> why.
-
-        Calling needs_embedding per item re-read the whole registry file each
-        time, which is quadratic: a 3,000 page crawl meant 3,000 full reads of a
-        multi-megabyte JSON file before any embedding even started.
         """
         snapshot = cls.items(source_id)
         needs_work, skip, reasons = [], [], {}
 
         for key, fresh_hash in hashes.items():
             item = snapshot.get(key)
-            reason = cls._decide_one(item, fresh_hash, expected_provider)
+            reason = cls._decide_one(item, fresh_hash, expected_provider, valid_vector_keys, key)
             reasons[key] = reason
             if reason == "unchanged":
                 skip.append(key)
@@ -193,9 +192,11 @@ class IngestionRegistry:
         return needs_work, skip, reasons
 
     @staticmethod
-    def _decide_one(item, fresh_hash, expected_provider):
+    def _decide_one(item, fresh_hash, expected_provider, valid_vector_keys=None, key=None):
         if item is None:
             return "new"
+        if valid_vector_keys is not None and key is not None and key not in valid_vector_keys:
+            return "vectors-missing-from-store"
         if item.get("content_hash") != fresh_hash:
             return "changed"
         if not item.get("chunk_ids"):

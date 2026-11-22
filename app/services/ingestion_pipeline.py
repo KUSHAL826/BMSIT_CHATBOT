@@ -84,8 +84,8 @@ def _plan_slices(chunks_by_key):
     return slices, deferred, empty
 
 
-def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
-    """Crawls the college website and embeds only what changed."""
+def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=False):
+    """Crawls the college website and embeds only what changed (or everything if force=True)."""
     source_id = KnowledgeStore.WEBSITE_SOURCE_ID
     source_label = KnowledgeStore.WEBSITE_SOURCE_NAME
 
@@ -145,21 +145,21 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
                 len(thin_pages),
             )
 
-        changed, unchanged, reasons = IngestionRegistry.decide_batch(
-            source_id, hashes, expected_provider=provider
-        )
-
         # Precise deduplication against active vector index, registry, and stored knowledge
         indexed_keys = rag.source_item_keys(source_id)
         registry_items = IngestionRegistry.items(source_id)
         stored_items = KnowledgeStore.get_items(source_id)
+
+        changed, unchanged, reasons = IngestionRegistry.decide_batch(
+            source_id, hashes, expected_provider=provider, valid_vector_keys=indexed_keys
+        )
 
         final_changed = []
         final_unchanged = set(unchanged)
 
         for url in changed:
             # If already present in vector store with matching content, DO NOT re-embed!
-            if url in indexed_keys:
+            if url in indexed_keys and not force:
                 # 1. Check registry content hash
                 reg_item = registry_items.get(url)
                 if reg_item and reg_item.get("content_hash") and reg_item.get("content_hash") == hashes.get(url):
@@ -214,6 +214,15 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             if url not in indexed_keys and url not in final_changed:
                 final_changed.append(url)
                 reasons[url] = "missing-from-vector-store"
+
+        # FORCE EMBED ALL: If force=True or active vector keys is severely incomplete (< 50 pages)
+        if force or len(indexed_keys) < 50:
+            logger.info("[Delta] Force embed active (force=%s, active_indexed=%d). Queuing all %d page(s).", force, len(indexed_keys), len(hashes))
+            for url in hashes:
+                if url not in final_changed:
+                    final_changed.append(url)
+                    reasons[url] = "force-reembed-or-incomplete-store"
+            confirmed_unchanged = []
 
         unchanged = confirmed_unchanged
         changed = final_changed

@@ -39,10 +39,15 @@ function createToastContainer() {
 // -------------------------------------------------------------
 function initScraperControls() {
   const scrapeBtn = document.getElementById("btn-scrape-now");
+  const forceScrapeBtn = document.getElementById("btn-force-scrape-now");
   const saveUrlBtn = document.getElementById("btn-save-settings");
   
   if (scrapeBtn) {
-    scrapeBtn.addEventListener("click", triggerScrapeNow);
+    scrapeBtn.addEventListener("click", () => triggerScrapeNow(false));
+  }
+
+  if (forceScrapeBtn) {
+    forceScrapeBtn.addEventListener("click", () => triggerScrapeNow(true));
   }
 
   if (saveUrlBtn) {
@@ -50,16 +55,23 @@ function initScraperControls() {
   }
 }
 
-async function triggerScrapeNow() {
+async function triggerScrapeNow(force = false) {
   const btn = document.getElementById("btn-scrape-now");
+  const forceBtn = document.getElementById("btn-force-scrape-now");
   const statusBox = document.getElementById("scraper-status-box");
   const statusMsg = document.getElementById("scraper-status-msg");
   const fillBar = document.getElementById("scraper-progress-fill");
   const statusBar = document.getElementById("scraper-status-bar");
   const liveBadge = document.getElementById("scraper-live-badge");
 
-  btn.disabled = true;
-  btn.innerHTML = `<span class="spinner">⏳</span> Scraping in Progress...`;
+  if (btn) {
+    btn.disabled = true;
+    btn.innerHTML = `<span class="spinner">⏳</span> Scraping in Progress...`;
+  }
+  if (forceBtn) {
+    forceBtn.disabled = true;
+    forceBtn.innerHTML = `<span class="spinner">⏳</span> In Progress...`;
+  }
   if (statusBox) statusBox.classList.add("active");
   if (statusBar) statusBar.style.display = "block";
   if (liveBadge) {
@@ -67,24 +79,29 @@ async function triggerScrapeNow() {
     liveBadge.className = "status-badge";
     liveBadge.style.color = "#38bdf8";
   }
-  statusMsg.textContent = "Starting BMSIT crawler...";
+  statusMsg.textContent = force ? "Starting full re-crawl and force embedding all pages..." : "Starting BMSIT crawler...";
   fillBar.style.width = "15%";
 
   try {
-    const res = await fetch("/api/admin/scrape", { method: "POST" });
+    const url = force ? "/api/admin/scrape?force=true" : "/api/admin/scrape";
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ force: !!force, trigger: force ? "Force Re-embed All Pages" : "Manual run" })
+    });
     const data = await res.json();
     if (res.ok) {
-      showToast("Web crawl initiated!", "success");
+      showToast(force ? "Full site scrape & force embedding initiated!" : "Web crawl initiated!", "success");
       pollScrapeProgress();
     } else {
       showToast(data.message || "Failed to trigger scrape", "error");
-      btn.disabled = false;
-      btn.innerHTML = "⚡ Scrape Now";
+      if (btn) { btn.disabled = false; btn.innerHTML = "⚡ Scrape Now"; }
+      if (forceBtn) { forceBtn.disabled = false; forceBtn.innerHTML = "🔄 Force Re-embed All Pages"; }
     }
   } catch (err) {
     showToast("Network error triggering scrape", "error");
-    btn.disabled = false;
-    btn.innerHTML = "⚡ Scrape Now";
+    if (btn) { btn.disabled = false; btn.innerHTML = "⚡ Scrape Now"; }
+    if (forceBtn) { forceBtn.disabled = false; forceBtn.innerHTML = "🔄 Force Re-embed All Pages"; }
   }
 }
 
@@ -124,8 +141,15 @@ function pollScrapeProgress() {
       } else {
         clearInterval(pollInterval);
         fillBar.style.width = "100%";
-        btn.disabled = false;
-        btn.innerHTML = "⚡ Scrape Now";
+        const forceBtn = document.getElementById("btn-force-scrape-now");
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = "⚡ Scrape Now";
+        }
+        if (forceBtn) {
+          forceBtn.disabled = false;
+          forceBtn.innerHTML = "🔄 Force Re-embed All Pages";
+        }
 
         if (status.error) {
           if (liveBadge) {
