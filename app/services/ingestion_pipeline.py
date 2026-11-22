@@ -227,26 +227,6 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
 
         IngestionRegistry.mark_unchanged(source_id, unchanged, "website", source_label)
 
-        # Keep the permanent text store in sync for every crawled page, whether
-        # or not it needs re-embedding.
-        KnowledgeStore.upsert_items(
-            source_id, "website", source_label,
-            {
-                url: {
-                    "title": page["title"],
-                    "text": page["content"],
-                    "metadata": {
-                        "url": url,
-                        "title": page["title"],
-                        "type": page.get("file_type") or "web",
-                        "is_document": page.get("is_document", False)
-                    },
-                }
-                for url, page in pages.items()
-            },
-            replace_missing=False,
-        )
-
         # ---------------- purge confirmed deleted pages ----------------
         deleted_urls = crawl.get("deleted_urls") or []
         if deleted_urls:
@@ -282,31 +262,30 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             f"{len(changed)} page(s) new/updated, {len(unchanged)} unchanged. Preparing chunks..."
         )
 
-        stored = KnowledgeStore.get_items(source_id)
         chunks_by_url = {}
         for url in changed:
-            item = stored.get(url)
-            if not item:
+            page = pages.get(url)
+            text = (page.get("content") or "").strip() if page else ""
+            if not text:
                 continue
-            meta = item.get("metadata") or {}
-            title = item.get("title") or url
+            title = page.get("title") or url
             now_ts = StorageService._now_ist_str()
             chunks_by_url[url] = rag.chunk_text(
-                text=item["text"],
+                text=text,
                 source_id=source_id,
                 source_name=title,
                 source_type="website",
                 metadata_extra={
-                    "url": meta.get("url", url),
+                    "url": url,
                     "title": title,
                     "type": "web",
                     "is_document": False,
                     "content_hash": hashes.get(url, ""),
                     "updated_at": now_ts,
-                    "created_at": meta.get("created_at") or now_ts,
+                    "created_at": now_ts,
                 },
                 item_key=url,
-                context_header=f"BMSIT: {title} ({meta.get('url', url)})",
+                context_header=f"BMSIT: {title} ({url})",
             )
 
         # ---------------- embed in committed slices ----------------
@@ -331,7 +310,7 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             scraper_status.phase = "embedding"
             scraper_status.status_message = (
                 f"Embedding batch {slice_index}/{len(planned)}: "
-                f"storing {len(slice_chunks)} chunk(s) from {len(slice_urls)} page(s) into Supabase vector database..."
+                f"storing {len(slice_chunks)} chunk(s) from {len(slice_urls)} page(s) into Supabase vector database & FAISS..."
             )
 
             try:
@@ -354,6 +333,24 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             added += update["added"]
             replaced += update["removed"]
 
+            # Save ONLY successfully embedded pages into KnowledgeStore and database
+            slice_items = {
+                u: {
+                    "title": pages[u]["title"],
+                    "text": pages[u]["content"],
+                    "metadata": {
+                        "url": u,
+                        "title": pages[u]["title"],
+                        "type": "web",
+                        "is_document": False,
+                        "content_hash": hashes.get(u, ""),
+                    },
+                }
+                for u in slice_urls if u in pages and (pages[u].get("content") or "").strip()
+            }
+            if slice_items:
+                KnowledgeStore.upsert_items(source_id, "website", source_label, slice_items, replace_missing=False)
+
             surviving = {c["chunk_id"] for c in rag.get_source_chunks(source_id)}
             IngestionRegistry.record_many(
                 source_id,
@@ -370,7 +367,7 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
                             if c["chunk_id"] in surviving
                         ),
                         "embed_provider": provider,
-                        "title": (stored.get(url) or {}).get("title"),
+                        "title": (pages.get(url) or {}).get("title"),
                     }
                     for url in slice_urls
                 ],
@@ -379,12 +376,22 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
             )
             embedded_pages += len(slice_urls)
 
+        # Ensure permanent KnowledgeStore text contains ONLY pages that are active in the vector database
+        active_keys = rag.source_item_keys(source_id)
+        if active_keys:
+            all_stored = set(KnowledgeStore.item_keys(source_id))
+            unembedded_keys = all_stored - set(active_keys)
+            if unembedded_keys:
+                logger.info("[Delta] Purged %d unembedded page(s) from KnowledgeStore: %s", len(unembedded_keys), unembedded_keys)
+                KnowledgeStore.delete_items(source_id, list(unembedded_keys))
+
+        stored = KnowledgeStore.get_items(source_id)
         total_chunks = rag.count_source_chunks(source_id)
         partial = bool(deferred)
 
         summary_parts = [
             f"Crawled {len(pages)} page(s)",
-            f"{len(changed)} needed embedding: {embedded_pages} embedded",
+            f"{len(changed)} needed embedding: {embedded_pages} embedded & stored into database",
             f"{len(unchanged)} unchanged and skipped",
         ]
         if deferred:
@@ -400,7 +407,7 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None):
         no_text_total = len(empty_pages) + len(missing_pages) + len(thin_pages)
         if no_text_total > 0:
             summary_parts.append(f"{no_text_total} had no usable text after cleaning")
-        summary_parts.append(f"{len(stored)} page(s) stored, {total_chunks} chunk(s) active")
+        summary_parts.append(f"{len(stored)} page(s) stored, {total_chunks} chunk(s) active in database")
         summary = " | ".join(part for part in summary_parts if part)
 
         StorageService.update_history_entry(

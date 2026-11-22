@@ -74,10 +74,9 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
      * NEVER issue a blanket refusal when partial information exists in the knowledge base.
 
 5. GRACEFUL MISSING INFORMATION PROTOCOL (STRICT REFUSAL RULE):
-   - If—and ONLY if—the entire requested topic, facility, or entity is genuinely and completely ABSENT from the provided context (0 mentions anywhere across all passages):
+   - If—and ONLY if—the entire requested topic, facility, or entity is genuinely and completely ABSENT from the provided context:
      * Do NOT guess or substitute unrelated departments or generic pages.
-     * If the entity IS mentioned (e.g. event notices, dates, years, committees), do NOT trigger this refusal! Provide all facts documented in the context.
-     * State clearly and courteously only when the entity is 100% absent:
+     * State clearly and courteously:
        "As of now, I don't have verified information regarding this in the BMSIT knowledge base. Please refer to https://bmsit.ac.in or contact the college directly:"
      * Provide the official college contact points:
        • Email: admissions@bmsit.in / principal@bmsit.in
@@ -515,6 +514,12 @@ class GeminiService:
                 continue
 
             filtered.append(c)
+
+        if max_title_hits >= 1:
+            filtered.sort(key=lambda c: (
+                1 if any(st in f"{c.get('source_name', '')} {(c.get('metadata') or {}).get('title', '')} {c.get('item_key', '')}".lower() for st in query_stems) else 0,
+                float(c.get("score", 0.0))
+            ), reverse=True)
 
         return filtered[:top_k] if filtered else chunks[:1]
 

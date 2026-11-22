@@ -220,14 +220,17 @@
                 <span class="crawl-run-time" style="color: #94a3b8; font-weight: 500;">{{ crawl.timestamp }}</span>
               </div>
 
-              <div class="crawl-run-summary" style="margin-top: 10px; font-size: 13px;">
+              <div class="crawl-run-summary" style="margin-top: 10px; font-size: 13px; display: flex; align-items: center; flex-wrap: wrap; gap: 8px;">
                 <span><strong>{{ crawl.pages_crawled|default(0) }}</strong> pages crawled</span>
+                <span class="crawl-sep">&bull;</span>
+                <span><strong>{{ crawl.pages_embedded|default(crawl.pages_changed|default(crawl.new_chunks|default(0))) }}</strong> embedded into database</span>
                 <span class="crawl-sep">&bull;</span>
                 <span><strong>{{ crawl.chunks_active|default(0) }}</strong> active chunks in RAG</span>
                 {% if crawl.changes_count is defined and crawl.changes_count > 0 %}
                 <span class="crawl-sep">&bull;</span>
                 <span class="crawl-changes-alert">{{ crawl.changes_count }} change(s) detected</span>
                 {% endif %}
+                <span style="margin-left: auto; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 600;">✓ Database Synced</span>
               </div>
 
               {% if crawl.summary %}
@@ -330,11 +333,11 @@
         <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
           <div
             style="background: rgba(56, 189, 248, 0.1); border: 1px solid rgba(56, 189, 248, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #38bdf8; font-weight: 600;">
-            📄 {{ website_pages|length }} Page(s) Scraped
+            📄 {{ website_pages|length }} Page(s) Scraped &amp; Embedded
           </div>
           <div
             style="background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.25); padding: 6px 14px; border-radius: 20px; font-size: 12px; color: #c084fc; font-weight: 600;">
-            🧩 {{ website_chunks_count }} Web Chunks Active
+            🧩 {{ website_chunks_count }} Web Chunks Active in Database
           </div>
         </div>
       </div>

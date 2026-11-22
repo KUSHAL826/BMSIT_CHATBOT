@@ -549,42 +549,7 @@ def _get_persistent_website_knowledge():
     except Exception as e:
         print(f"[Admin] KnowledgeStore website read error: {e}")
 
-    # 2. Scrape State (data/scrape_state.json)
-    try:
-        scrape_state = StorageService.load_scrape_state()
-        state_pages = scrape_state.get("pages", {}) if isinstance(scrape_state, dict) else {}
-        for url, pinfo in state_pages.items():
-            if not url:
-                continue
-            pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
-            title = _clean_page_title(pinfo.get("title"), url)
-            length = pinfo.get("length", 0)
-            date = pinfo.get("last_seen") or scrape_state.get("last_scrape") or now_ist_str()
-            if url not in pages_map:
-                pages_map[url] = {
-                    "id": pid,
-                    "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
-                    "item_key": url,
-                    "url": url,
-                    "title": title,
-                    "source": title,
-                    "source_type": "website",
-                    "file_type": "web",
-                    "status": "Indexed",
-                    "chunk_count": 0,
-                    "date": date,
-                    "chars": length,
-                    "changes": f"{length:,} chars" if length else "Indexed",
-                    "text": "",
-                }
-            else:
-                if not pages_map[url]["chars"] and length:
-                    pages_map[url]["chars"] = length
-                    pages_map[url]["changes"] = f"{length:,} chars"
-    except Exception as e:
-        print(f"[Admin] Scrape state read error: {e}")
-
-    # 3. Local RAG Chunks (FAISS)
+    # 2. Local RAG Chunks (FAISS) - primary source of verified embedded chunks
     try:
         rag = RAGService.get_instance()
         with rag._lock:
@@ -617,7 +582,7 @@ def _get_persistent_website_knowledge():
     except Exception as e:
         print(f"[Admin] RAG chunks read error: {e}")
 
-    # 4. Supabase Persistent Vectors (survives Render redeployments)
+    # 3. Supabase Persistent Vectors (survives Render redeployments)
     try:
         supabase_vectors = _load_supabase_vectors_for_admin()
         for row in supabase_vectors:
@@ -652,22 +617,11 @@ def _get_persistent_website_knowledge():
     except Exception as e:
         print(f"[Admin] Supabase website pages read error: {e}")
 
-    pages = list(pages_map.values())
+    # STRICT FILTER: Show ONLY pages that are both scraped AND successfully embedded into the vector database
+    pages = [p for p in pages_map.values() if p.get("chunk_count", 0) > 0]
 
-    # Fallback: If no individual URLs could be extracted, but website entry exists in history
-    if not pages:
-        try:
-            local_history = StorageService.load_history() or []
-            for h in local_history:
-                if h.get("source_type") == "website" or h.get("id") == KnowledgeStore.WEBSITE_SOURCE_ID:
-                    pages.append(h)
-        except Exception:
-            pass
-
-    # Ensure chunk counts and category classification are populated
+    # Populate category classification
     for p in pages:
-        if p.get("chunk_count", 0) == 0 and p.get("chars", 0) > 0:
-            p["chunk_count"] = max(1, p["chars"] // 500)
         p["category"] = _categorize_web_page(p.get("url", ""), p.get("title", ""))
 
     # Sort pages: highest chunk count first, then by title
