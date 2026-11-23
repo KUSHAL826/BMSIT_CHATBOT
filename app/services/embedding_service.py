@@ -179,6 +179,12 @@ class ApiKeyPool:
         with self._lock:
             return sum(s.get("network_errors", 0) for s in self._states.values())
 
+    def min_cooldown_wait(self):
+        now = time.time()
+        with self._lock:
+            active_waits = [max(0.0, s["cooldown_until"] - now) for s in self._states.values() if s["cooldown_until"] > now]
+            return min(active_waits) if active_waits else 0.0
+
     def quota_hit_count(self):
         with self._lock:
             return sum(s.get("quota_hits", 0) for s in self._states.values())
@@ -261,7 +267,14 @@ class GeminiEmbeddingBackend:
         for _ in range(attempts):
             acquired = self.pool.acquire()
             if acquired is None:
-                return None
+                # If key is temporarily in RPM cooldown (e.g. 429 backoff), pause briefly to reset quota
+                min_wait = self.pool.min_cooldown_wait()
+                if 0 < min_wait <= 25:
+                    logger.info("[Embeddings] Key in short RPM cooldown. Waiting %0.1fs for rate limit reset...", min_wait)
+                    await asyncio.sleep(min_wait + 0.5)
+                    acquired = self.pool.acquire()
+                if acquired is None:
+                    return None
             state, wait = acquired
             if wait > 0:
                 await asyncio.sleep(wait)
@@ -519,7 +532,7 @@ class EmbeddingService:
         if not texts:
             return np.zeros((0, Config.EMBEDDING_DIM), dtype=np.float32), [], 0
         if allow_local_fallback is None:
-            allow_local_fallback = self.pool.configured_count() == 0
+            allow_local_fallback = True  # Guarantee all chunks are embedded even when remote API limits are hit
 
         provider = self.active_provider_id()
         counts = token_counts or [count_tokens(t) for t in texts]

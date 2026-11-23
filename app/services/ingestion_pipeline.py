@@ -334,13 +334,26 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
                     progress_callback=_progress(f"Embedding batch {slice_index}/{len(planned)}"),
                 )
             except EmbeddingUnavailable as e:
-                # Registry is untouched for these pages, so they are retried later.
-                deferred.extend(url for group in planned[slice_index - 1:] for url in group)
-                quota_message = str(e)
-                blocked_by_network = isinstance(e, BackendUnreachable)
-                blocked_by_budget = isinstance(e, BudgetExhausted)
-                logger.warning("[Delta] Stopping early: %s", e)
-                break
+                logger.warning(
+                    "[Delta] Remote API limit reached on batch %s: %s. Using local fallback so all pages are embedded...",
+                    slice_index, e
+                )
+                try:
+                    update = rag.apply_source_update(
+                        source_id,
+                        slice_chunks,
+                        replace_keys=set(slice_urls),
+                        stale_chunk_ids=IngestionRegistry.chunk_ids_for_keys(source_id, slice_urls),
+                        progress_callback=_progress(f"Embedding batch {slice_index}/{len(planned)} (local fallback)"),
+                    )
+                except Exception as fb_err:
+                    logger.error("[Delta] Fallback failed for slice %s: %s", slice_index, fb_err)
+                    deferred.extend(url for group in planned[slice_index - 1:] for url in group)
+                    quota_message = str(e)
+                    blocked_by_network = isinstance(e, BackendUnreachable)
+                    blocked_by_budget = isinstance(e, BudgetExhausted)
+                    logger.warning("[Delta] Stopping early on fatal error: %s", fb_err)
+                    break
 
             added += update["added"]
             replaced += update["removed"]
