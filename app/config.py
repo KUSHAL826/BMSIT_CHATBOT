@@ -77,7 +77,7 @@ _SPEC = {
     "EMBED_MODEL": ("str", "gemini-embedding-001"),
     "EMBEDDING_DIM": ("int", 768),
     "EMBED_MAX_BATCH_TEXTS": ("int", 50),
-    "EMBED_MAX_BATCH_TOKENS": ("int", 20000),
+    "EMBED_MAX_BATCH_TOKENS": ("int", 100000),
     "EMBED_MAX_INPUT_TOKENS": ("int", 2048),
     "EMBED_MAX_CONCURRENCY": ("int", 2),
     "EMBED_TIMEOUT": ("int", 60),

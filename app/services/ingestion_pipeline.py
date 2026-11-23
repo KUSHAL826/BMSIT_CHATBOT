@@ -114,7 +114,7 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
         # ---------------- change detection ----------------
         # Check content changes against previous crawl to only embed new/modified pages
         hashes, thin_pages = {}, []
-        min_tokens = Config.SCRAPE_MIN_PAGE_TOKENS or 0
+        min_tokens = 0  # CRITICAL: Always embed all valid college pages regardless of length; never skip
         for url, page in pages.items():
             text = (page.get("content") or "").strip()
             if not text:
