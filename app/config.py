@@ -47,8 +47,8 @@ _SPEC = {
     "PORT": ("int", 5000),
     "DEBUG": ("bool", False),
     "LOG_LEVEL": ("str", "INFO"),
-    "SECRET_KEY": ("str", "bmsit-ai-secret-key-2026-supersecure"),
-    "ADMIN_PASSWORD": ("str", "admin123"),
+    "SECRET_KEY": ("str", ""),
+    "ADMIN_PASSWORD": ("str", ""),
     "ADMIN_SESSION_TIMEOUT_MINUTES": ("int", 20),
 
     # Crawler
@@ -174,7 +174,23 @@ def _generated_secret_key():
     return secrets.token_urlsafe(32)
 
 
-class Config:
+class _ConfigMeta(type):
+    """Provides dynamic property access for sensitive credentials directly from environment."""
+    @property
+    def ADMIN_PASSWORD(cls):
+        return (os.getenv("ADMIN_PASSWORD") or "").strip()
+
+    @property
+    def SECRET_KEY(cls):
+        val = (os.getenv("SECRET_KEY") or "").strip()
+        if not val:
+            if not hasattr(cls, "_generated_secret_key_cached"):
+                cls._generated_secret_key_cached = secrets.token_urlsafe(32)
+            return cls._generated_secret_key_cached
+        return val
+
+
+class Config(metaclass=_ConfigMeta):
     # ------------------------------------------------------------------
     # Paths (structural, not configurable)
     # ------------------------------------------------------------------
@@ -207,8 +223,14 @@ class Config:
     PORT = _get("PORT")
     DEBUG = _get("DEBUG")
     LOG_LEVEL = _get("LOG_LEVEL")
-    SECRET_KEY = _get("SECRET_KEY") or _generated_secret_key()
-    ADMIN_PASSWORD = _get("ADMIN_PASSWORD")
+    # SECRET_KEY and ADMIN_PASSWORD are read dynamically from os.environ via _ConfigMeta properties
+    @classmethod
+    def get_admin_password(cls):
+        return (os.getenv("ADMIN_PASSWORD") or "").strip()
+
+    @classmethod
+    def get_secret_key(cls):
+        return cls.SECRET_KEY
 
     # ------------------------------------------------------------------
     # Crawler

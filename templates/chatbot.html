@@ -11,10 +11,10 @@
   <a class="skip-link" href="#composer-input">Skip to the question box</a>
 
   <div class="shell">
-    <!-- Official BMSIT Institutional Header (Single White Header) -->
+    <!-- Official BMSIT Institutional Header -->
     <header class="college-header">
       <a href="https://bmsit.ac.in" target="_blank" rel="noopener noreferrer" class="college-header-logo-link" title="B.M.S. Institute of Technology & Management">
-        <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMS Institute of Technology & Management" class="college-header-logo" onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/bmsit-official.png') }}';">
+        <span class="college-header-title">B.M.S. Institute of Technology &amp; Management</span>
       </a>
       <div class="header-actions">
         <span class="status-pill" id="kb-status" role="status" title="Knowledge Base Connected">
@@ -33,10 +33,6 @@
     <main class="conversation" id="conversation" role="log" aria-live="polite" aria-label="Conversation">
       <section class="welcome" id="welcome">
         <h2>How can I help with BMSIT today?</h2>
-        <p>
-          I answer from the college's official website and documents, and I cite the
-          exact page I used. If something is not in there, I will say so rather than guess.
-        </p>
 
         <div class="suggestions" id="suggestions">
           <button type="button" class="suggestion" data-q="What engineering branches and courses are offered at BMSIT?">

@@ -918,20 +918,24 @@ def require_admin_auth():
     if request.path in ("/admin/login", "/admin/logout"):
         return None
 
-    # Check header token against ADMIN_PASSWORD, SECRET_KEY, or fallback 'admin123'
+    # Dynamic authentication credentials read live from Render environment variables
     auth_header = (request.headers.get("X-Admin-Key") or request.headers.get("x-admin-key") or "").strip()
     bearer_token = request.headers.get("Authorization", "").replace("Bearer ", "").strip()
     provided_key = auth_header or bearer_token
 
-    # Allow automated GitHub Action requests for scrape endpoints whenever X-Admin-Key header is provided
-    if request.path in ("/api/admin/scrape", "/api/admin/scrape/status") and provided_key:
-        return None
+    admin_pw = (os.getenv("ADMIN_PASSWORD") or Config.ADMIN_PASSWORD or "").strip()
+    secret_k = (os.getenv("SECRET_KEY") or Config.SECRET_KEY or "").strip()
+    valid_keys = {k for k in (admin_pw, secret_k) if k}
 
-    valid_keys = {p for p in (Config.ADMIN_PASSWORD, Config.SECRET_KEY, "admin123", "bmsit-ai-secret-key-2026-supersecure") if p}
+    # Allow automated GitHub Action and scraper requests whenever valid environment key is provided
+    if request.path in ("/api/admin/scrape", "/api/admin/scrape/status"):
+        if provided_key and (provided_key in valid_keys or (admin_pw and provided_key == admin_pw)):
+            return None
+
     if provided_key and provided_key in valid_keys:
         return None
 
-    if Config.ADMIN_PASSWORD:
+    if admin_pw:
         if not session.get("admin_authenticated"):
             if request.path.startswith("/api/admin"):
                 return jsonify({"error": "Unauthorized. Admin authentication required.", "session_expired": True}), 401
@@ -958,9 +962,10 @@ def require_admin_auth():
 
 @admin_bp.route("/admin/login", methods=["GET", "POST"])
 def login_page():
+    admin_pw = (os.getenv("ADMIN_PASSWORD") or Config.ADMIN_PASSWORD or "").strip()
     if request.method == "POST":
         password = (request.form.get("password") or "").strip()
-        if password == Config.ADMIN_PASSWORD:
+        if admin_pw and password == admin_pw:
             session.clear()
             session["admin_authenticated"] = True
             session["last_activity"] = time.time()
