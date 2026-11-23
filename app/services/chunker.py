@@ -110,7 +110,7 @@ def split_into_token_chunks(text, target_tokens=None, max_tokens=None, overlap_t
     # Primary: Production LangChain RecursiveCharacterTextSplitter
     if RecursiveCharacterTextSplitter is not None:
         chunk_size_chars = int(ceiling * 3.8)
-        chunk_overlap_chars = int(overlap * 3.8)
+        chunk_overlap_chars = min(int(overlap * 3.8), max(0, chunk_size_chars - 10))
         splitter = RecursiveCharacterTextSplitter(
             chunk_size=chunk_size_chars,
             chunk_overlap=chunk_overlap_chars,

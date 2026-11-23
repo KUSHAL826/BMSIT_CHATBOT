@@ -76,7 +76,7 @@ _SPEC = {
     # Embeddings
     "EMBED_MODEL": ("str", "gemini-embedding-001"),
     "EMBEDDING_DIM": ("int", 768),
-    "EMBED_MAX_BATCH_TEXTS": ("int", 100),
+    "EMBED_MAX_BATCH_TEXTS": ("int", 50),
     "EMBED_MAX_BATCH_TOKENS": ("int", 20000),
     "EMBED_MAX_INPUT_TOKENS": ("int", 2048),
     "EMBED_MAX_CONCURRENCY": ("int", 2),
@@ -84,7 +84,7 @@ _SPEC = {
     "EMBED_RETRIES": ("int", 2),
     "EMBED_MIN_INTERVAL": ("float", 0.5),
     "EMBED_KEY_COOLDOWN": ("int", 60),
-    "EMBED_COMMIT_SLICE_CHUNKS": ("int", 150),
+    "EMBED_COMMIT_SLICE_CHUNKS": ("int", 500),
     "EMBED_MAX_CHUNKS_PER_RUN": ("int", 0),
     "EMBED_CACHE_ENABLED": ("bool", True),
     "EMBED_CACHE_MAX_VECTORS": ("int", 200000),

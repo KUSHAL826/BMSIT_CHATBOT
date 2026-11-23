@@ -1345,18 +1345,6 @@ def trigger_scrape_now():
     the BMSIT website and updates FAISS.
     """
 
-    if scraper_status.is_running:
-
-        return jsonify({
-
-            "status":
-                "busy",
-
-            "message":
-                "A scrape job is already in progress"
-
-        }), 409
-
     trigger_name = (
         request.headers.get("X-Trigger")
         or request.args.get("trigger")
@@ -1369,6 +1357,16 @@ def trigger_scrape_now():
         or str((request.get_json(silent=True) or {}).get("force", "")).lower() in ("true", "1", "yes")
         or request.headers.get("X-Force") == "true"
     )
+
+    if scraper_status.is_running:
+        if force_flag:
+            logging.getLogger(__name__).info("[Admin] Overriding running scraper status for force re-embed.")
+            scraper_status.is_running = False
+        else:
+            return jsonify({
+                "status": "busy",
+                "message": "A scrape job is already in progress"
+            }), 409
 
     def background_task():
         execute_bmsit_scrape_and_index(

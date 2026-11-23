@@ -56,7 +56,7 @@ def _plan_slices(chunks_by_key):
 
 def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=False):
     """Crawls the college website and embeds only what changed (or everything if force=True)."""
-    if scraper_status.is_running:
+    if scraper_status.is_running and not force:
         logger.warning("[Delta] A crawl/ingestion job is already running; skipping concurrent invocation.")
         return {"status": "busy", "message": "Scrape already running"}
 

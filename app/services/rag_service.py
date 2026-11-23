@@ -21,7 +21,10 @@ import logging
 import re
 import threading
 
-import faiss
+try:
+    import faiss
+except (ImportError, Exception):
+    faiss = None
 import numpy as np
 
 from app.config import Config
@@ -179,16 +182,22 @@ class RAGService:
 
         spaces = {}
         for provider, positions in by_provider.items():
-            index = faiss.IndexFlatIP(self._dim)
-            if positions:
-                index.add(np.ascontiguousarray(self._embeddings[positions]))
+            if faiss is not None:
+                index = faiss.IndexFlatIP(self._dim)
+                if positions:
+                    index.add(np.ascontiguousarray(self._embeddings[positions]))
+            else:
+                index = None
             spaces[provider] = (index, positions)
         self._spaces = spaces
 
-        combined = faiss.IndexFlatIP(self._dim)
-        if len(self._embeddings):
-            combined.add(np.ascontiguousarray(self._embeddings))
-        self._index = combined
+        if faiss is not None:
+            combined = faiss.IndexFlatIP(self._dim)
+            if len(self._embeddings):
+                combined.add(np.ascontiguousarray(self._embeddings))
+            self._index = combined
+        else:
+            self._index = None
 
     def _persist(self):
         Config.ensure_directories()
@@ -200,7 +209,8 @@ class RAGService:
                 np.save(handle, embeddings)
 
         atomic_write_bytes(self._emb_file, write_npy)
-        atomic_write_bytes(self._index_file, lambda tmp: faiss.write_index(self._index, tmp))
+        if faiss is not None and self._index is not None:
+            atomic_write_bytes(self._index_file, lambda tmp: faiss.write_index(self._index, tmp))
 
     # ------------------------------------------------------------------
     # Introspection
@@ -460,13 +470,20 @@ class RAGService:
             existing_ids = {c.get("chunk_id") for c in self._chunks if c.get("chunk_id")}
             existing_digests = {self._dedupe_key(c) for c in self._chunks}
 
-        # Purge old vectors for updated pages from Supabase
+        # Purge old vectors for updated pages from Supabase (fast bulk delete if many keys)
         if supabase.is_enabled and replace_set:
-            for rk in replace_set:
+            if len(replace_set) >= 30 or str(source_id).strip() in ("web-bmsit", "website"):
                 try:
-                    supabase.delete_item_key(rk)
+                    supabase.delete_source(source_id)
+                    logger.info("[RAG] Fast bulk deleted source '%s' from Supabase in 1 request.", source_id)
                 except Exception as ex:
-                    logger.warning("[RAG] Supabase delete_item_key warning for %s: %s", rk, ex)
+                    logger.warning("[RAG] Supabase bulk delete_source warning: %s", ex)
+            else:
+                for rk in replace_set:
+                    try:
+                        supabase.delete_item_key(rk)
+                    except Exception as ex:
+                        logger.warning("[RAG] Supabase delete_item_key warning for %s: %s", rk, ex)
 
         filtered_chunks = []
         if new_chunks:
@@ -785,18 +802,24 @@ class RAGService:
         dense_scores = {}
 
         for provider, (index, positions) in spaces.items():
-            if not positions or index.ntotal == 0 or provider == PROVIDER_LEGACY:
+            if not positions or provider == PROVIDER_LEGACY:
                 continue
 
-            # FAISS vector search with raw user query
+            # FAISS vector search with raw user query (or numpy dot-product fallback if FAISS unavailable)
             query_vector = self._embedder.embed_query(query, provider)
             if query_vector is not None and len(query_vector):
                 search_k = min(len(positions), max(fetch_k, 40))
-                scores, ids = index.search(np.ascontiguousarray(query_vector), search_k)
-                hits = [
-                    (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
-                    if 0 <= i < len(positions)
-                ]
+                if index is not None and hasattr(index, "search"):
+                    scores, ids = index.search(np.ascontiguousarray(query_vector), search_k)
+                    hits = [
+                        (positions[i], float(s)) for s, i in zip(scores[0], ids[0])
+                        if 0 <= i < len(positions)
+                    ]
+                else:
+                    sub_embs = self._embeddings[positions]
+                    sims = np.dot(sub_embs, query_vector[0])
+                    top_indices = np.argsort(sims)[::-1][:search_k]
+                    hits = [(positions[idx], float(sims[idx])) for idx in top_indices]
                 if hits:
                     # L2-normalized vector inner product equals true cosine similarity in [-1.0, 1.0]
                     # Clamp to [0.0, 1.0] without distorting min-max scaling
