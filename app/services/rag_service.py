@@ -224,12 +224,18 @@ class RAGService:
             }
 
     def get_source_chunks(self, source_id):
+        valid = {str(source_id).strip()}
+        if str(source_id).strip() in ("web-bmsit", "website"):
+            valid.update({"web-bmsit", "website"})
         with self._lock:
-            return [dict(c) for c in self._chunks if c.get("source_id") == source_id]
+            return [dict(c) for c in self._chunks if str(c.get("source_id") or "").strip() in valid]
 
     def count_source_chunks(self, source_id):
+        valid = {str(source_id).strip()}
+        if str(source_id).strip() in ("web-bmsit", "website"):
+            valid.update({"web-bmsit", "website"})
         with self._lock:
-            return sum(1 for c in self._chunks if c.get("source_id") == source_id)
+            return sum(1 for c in self._chunks if str(c.get("source_id") or "").strip() in valid)
 
     def source_item_keys(self, source_id):
         with self._lock:

@@ -61,6 +61,9 @@ class WebsiteScraper:
         ".css", ".js", ".map", ".woff", ".woff2", ".ttf", ".eot"
     )
 
+    # Allowed hosts strictly restricted to the official BMSIT website domains
+    ALLOWED_HOSTS = {"bmsit.ac.in", "projects.bmsit.ac.in"}
+
     def __init__(self, base_url=None, max_pages=None, max_depth=None):
         settings = StorageService.load_settings()
         self.base_url = (
@@ -94,8 +97,8 @@ class WebsiteScraper:
         """
         val = Config.SCRAPE_REQUEST_TIMEOUT
         if val is not None and val > 0:
-            return (min(val, 6), val)
-        return (5, 12)
+            return (min(val, 4), min(val, 8))
+        return (4, 8)
 
     def _is_internal_domain(self, target_url: str) -> bool:
         """
@@ -134,7 +137,12 @@ class WebsiteScraper:
         raw_href = html.unescape(raw_href).strip()
         if not raw_href or raw_href.startswith(("javascript:", "mailto:", "tel:", "#", "whatsapp:", "sms:")):
             return None
-        if re.search(r'\s', raw_href) or raw_href.upper() in ("NIL", "NULL", "NONE"):
+        if re.search(r'\s', raw_href) or raw_href.upper() in ("NIL", "NULL", "NONE", "NA", "NO"):
+            return None
+
+        # Exclude numeric phone number paths extracted from tables and form action scripts
+        clean_raw = raw_href.strip("/").split("?")[0]
+        if clean_raw.isdigit() or clean_raw.lower() in ("contact-process.php", "query-process.php"):
             return None
 
         # Upgrade scheme-less domains (e.g. bmsit.ac.in/... or other domains)
@@ -177,15 +185,19 @@ class WebsiteScraper:
         else:
             target = target.rstrip("/") if target.endswith("/") else target
 
+        # Reject unallowed hosts immediately so dead domains like dspace are NEVER queued
+        if not self._is_allowed_domain(target):
+            return None
+
         return target
 
     def _is_allowed_domain(self, target_url: str) -> bool:
         """
         Determines whether a URL is permitted for text crawling.
-        Strictly allows ONLY BMSIT official website and subdomains (*.bmsit.ac.in).
-        All external domains (including LinkedIn, IRINS, research portals, etc.)
-        and intranet login portals (SIMS staff/student, exam results) are excluded
-        to guarantee lightning-fast crawl times and avoid anti-bot blocks.
+        Strictly allows ONLY official BMSIT website domains: bmsit.ac.in and projects.bmsit.ac.in.
+        Instantly excludes dead/intranet subdomains (dspace, ieee, staff, student, results)
+        and external portals (LinkedIn, IRINS, ResearchGate, BMSET) to guarantee
+        lightning-fast crawl times and prevent hangs.
         """
         if not target_url:
             return False
@@ -196,8 +208,13 @@ class WebsiteScraper:
         if not netloc:
             return False
 
-        # Reject malformed URLs containing fake nested domain paths (crawler traps)
+        # Strictly allow ONLY official BMSIT website hosts
+        # Blocks dspace.bmsit.ac.in, ieee.bmsit.ac.in, staff.bmsit.ac.in, student.bmsit.ac.in, results.bmsit.ac.in, etc.
+        if netloc not in self.ALLOWED_HOSTS:
+            return False
+
         path_lower = parsed.path.lower()
+        # Reject malformed URLs containing fake nested domain paths (crawler traps)
         if any(ext_dom in path_lower for ext_dom in (".com/", ".org/", ".net/", ".edu/", ".gov/", ".io/")):
             return False
 
@@ -205,19 +222,11 @@ class WebsiteScraper:
         if any(path_lower.endswith(ext) for ext in self.SKIP_EXTENSIONS):
             return False
 
-        # Explicitly reject external portals, social media, research networks, or trusts
-        if any(d in netloc for d in ("irins", "researchgate", "bmset.org", "linkedin.com", "facebook.com", "x.com", "youtube.com", "instagram.com")):
+        # Exclude dspace/xmlui repository paths
+        if "xmlui" in path_lower or "dspace" in path_lower or "handle/" in path_lower:
             return False
 
-        # Exclude password-protected intranet/login portals and dead subdomains
-        if any(portal in netloc for portal in ("staff.bmsit.ac.in", "student.bmsit.ac.in", "results.bmsit.ac.in", "ieee.bmsit.ac.in")):
-            return False
-
-        # ONLY BMSIT domain and subdomains (bmsit.ac.in, projects.bmsit.ac.in, etc.)
-        if netloc == self.apex_domain or netloc.endswith("." + self.apex_domain):
-            return True
-
-        return False
+        return True
 
     def run_sync(self, keep_running_for_indexing=False):
         """
@@ -251,65 +260,69 @@ class WebsiteScraper:
 
         try:
             while queue and len(visited) < self.max_pages:
-                url, depth = queue.pop(0)
+                try:
+                    url, depth = queue.pop(0)
 
-                # Normalize URL
-                url = url.split("#")[0]
-                if "?" not in url:
-                    url = url.rstrip("/")
-                else:
-                    url = url.rstrip("/") if url.endswith("/") else url
+                    # Normalize URL
+                    url = url.split("#")[0]
+                    if "?" not in url:
+                        url = url.rstrip("/")
+                    else:
+                        url = url.rstrip("/") if url.endswith("/") else url
 
-                if not url or url in visited:
+                    if not url or url in visited:
+                        continue
+                    
+                    # Check domain boundary
+                    if not self._is_allowed_domain(url):
+                        continue
+
+                    visited.add(url)
+                    scraper_status.current_url = url
+                    scraper_status.status_message = f"Scraping [{len(visited)}/{self.max_pages}]: {url}"
+
+                    anchor = anchor_map.get(url)
+                    page_data = self._fetch_and_clean_page(url, anchor_text=anchor)
+                    if not page_data:
+                        continue
+
+                    actual_url = page_data.get("url") or url
+                    # If actual_url was already visited or in scraped_pages (e.g. via redirect), skip duplicate
+                    if actual_url != url and actual_url in visited:
+                        logger.debug("[Scraper] Canonical URL '%s' already indexed; skipping duplicate from '%s'.", actual_url, url)
+                        continue
+
+                    visited.add(actual_url)
+                    scraped_pages[actual_url] = page_data
+                    scraper_status.pages_scraped = len(scraped_pages)
+
+                    # Discover new links dynamically if depth allows (only from internal BMSIT domains)
+                    if depth < self.max_depth and len(queue) < 50000 and self._is_internal_domain(actual_url):
+                        for link_item in page_data.get("links", []):
+                            if isinstance(link_item, (tuple, list)):
+                                link_url = link_item[0]
+                                link_anchor = link_item[1] if len(link_item) > 1 else ""
+                            else:
+                                link_url, link_anchor = link_item, ""
+
+                            clean_link = link_url.split("#")[0]
+                            if "?" not in clean_link:
+                                clean_link = clean_link.rstrip("/")
+                            else:
+                                clean_link = clean_link.rstrip("/") if clean_link.endswith("/") else clean_link
+
+                            if clean_link and clean_link not in visited and clean_link not in queued_urls:
+                                if self._is_allowed_domain(clean_link):
+                                    queue.append((clean_link, depth + 1))
+                                    queued_urls.add(clean_link)
+                                    if link_anchor and clean_link not in anchor_map:
+                                        anchor_map[clean_link] = link_anchor
+
+                    # Polite delay
+                    time.sleep(Config.SCRAPE_DELAY)
+                except Exception as page_err:
+                    logger.warning("[Scraper] Non-fatal error while scraping %s: %s", url if 'url' in locals() else 'unknown', page_err)
                     continue
-                
-                # Check domain boundary
-                if not self._is_allowed_domain(url):
-                    continue
-
-                visited.add(url)
-                scraper_status.current_url = url
-                scraper_status.status_message = f"Scraping [{len(visited)}/{self.max_pages}]: {url}"
-
-                anchor = anchor_map.get(url)
-                page_data = self._fetch_and_clean_page(url, anchor_text=anchor)
-                if not page_data:
-                    continue
-
-                actual_url = page_data.get("url") or url
-                # If actual_url was already visited or in scraped_pages (e.g. via redirect), skip duplicate
-                if actual_url != url and actual_url in visited:
-                    logger.debug("[Scraper] Canonical URL '%s' already indexed; skipping duplicate from '%s'.", actual_url, url)
-                    continue
-
-                visited.add(actual_url)
-                scraped_pages[actual_url] = page_data
-                scraper_status.pages_scraped = len(scraped_pages)
-
-                # Discover new links dynamically if depth allows (only from internal BMSIT domains)
-                if depth < self.max_depth and len(queue) < 50000 and self._is_internal_domain(actual_url):
-                    for link_item in page_data.get("links", []):
-                        if isinstance(link_item, (tuple, list)):
-                            link_url = link_item[0]
-                            link_anchor = link_item[1] if len(link_item) > 1 else ""
-                        else:
-                            link_url, link_anchor = link_item, ""
-
-                        clean_link = link_url.split("#")[0]
-                        if "?" not in clean_link:
-                            clean_link = clean_link.rstrip("/")
-                        else:
-                            clean_link = clean_link.rstrip("/") if clean_link.endswith("/") else clean_link
-
-                        if clean_link and clean_link not in visited and clean_link not in queued_urls:
-                            if self._is_allowed_domain(clean_link):
-                                queue.append((clean_link, depth + 1))
-                                queued_urls.add(clean_link)
-                                if link_anchor and clean_link not in anchor_map:
-                                    anchor_map[clean_link] = link_anchor
-
-                # Polite delay
-                time.sleep(Config.SCRAPE_DELAY)
 
             # Remove site chrome that repeats across HTML pages (mega-menus, footers)
             scraper_status.phase = "cleaning"
@@ -523,7 +536,7 @@ class WebsiteScraper:
 
             # Resilient fetch with retries to prevent dropping slow or busy pages
             resp = None
-            max_attempts = 3
+            max_attempts = 2
             for attempt in range(1, max_attempts + 1):
                 try:
                     resp = self.session.get(
@@ -531,19 +544,19 @@ class WebsiteScraper:
                     )
                     if resp.status_code == 200:
                         break
-                    elif resp.status_code in (404, 410, 999):
+                    elif resp.status_code in (404, 410, 500, 502, 503, 504, 999):
                         logger.debug("[Scraper] Skipping %s: HTTP status %s", url, resp.status_code)
                         return None
                     else:
                         logger.debug("[Scraper] HTTP status %s on attempt %d for %s", resp.status_code, attempt, url)
                         if attempt < max_attempts:
-                            time.sleep(0.5 * attempt)
-                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as e:
+                            time.sleep(0.3 * attempt)
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError, requests.exceptions.RequestException) as e:
                     logger.debug("[Scraper] Attempt %d failed for %s: %s", attempt, url, e)
                     if attempt < max_attempts:
-                        time.sleep(1.0 * attempt)
+                        time.sleep(0.5 * attempt)
                     else:
-                        logger.warning("[Scraper] Timeout/Connection error for %s after %d attempts: %s", url, max_attempts, e)
+                        logger.warning("[Scraper] Skipping unresponsive URL %s: %s", url, e)
                         return None
                 except Exception as e:
                     logger.debug("[Scraper] Error fetching %s: %s", url, e)
