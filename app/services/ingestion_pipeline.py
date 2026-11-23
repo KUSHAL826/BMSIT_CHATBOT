@@ -115,17 +115,33 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
     scraper_status.status_message = f"Starting crawl of {target_url}"
 
     try:
-        scraper = WebsiteScraper(
-            base_url=target_url,
-            max_pages=int(os.getenv("SCRAPE_MAX_PAGES") or Config.SCRAPE_MAX_PAGES),
-            max_depth=int(os.getenv("SCRAPE_DEPTH") or Config.SCRAPE_DEPTH),
-        )
-        crawl = scraper.run_sync(keep_running_for_indexing=True)
+        content_file = Config.SCRAPED_DIR / "bmsit_web_content.json"
+        from app.services.fsutil import read_json
+        saved_snapshot = read_json(content_file, default={}) or {}
 
-        if crawl.get("status") != "success":
-            return _crawl_failed(rag, source_id, crawl.get("message", "unknown error"))
+        # FAST FORCE RE-EMBED: If force=True and snapshot exists, skip redundant network crawl
+        # and embed all canonical pages directly into Supabase & FAISS
+        if force and isinstance(saved_snapshot, dict) and len(saved_snapshot) >= 50:
+            logger.info("[Delta] Force re-embed requested with %d snapshot pages. Proceeding straight to chunking & embedding...", len(saved_snapshot))
+            pages = dict(saved_snapshot)
+            crawl = {"status": "success", "scraped_pages": pages, "changes": []}
+        else:
+            scraper = WebsiteScraper(
+                base_url=target_url,
+                max_pages=int(os.getenv("SCRAPE_MAX_PAGES") or Config.SCRAPE_MAX_PAGES),
+                max_depth=int(os.getenv("SCRAPE_DEPTH") or Config.SCRAPE_DEPTH),
+            )
+            crawl = scraper.run_sync(keep_running_for_indexing=True)
 
-        pages = crawl.get("scraped_pages", {})
+            if crawl.get("status") != "success":
+                return _crawl_failed(rag, source_id, crawl.get("message", "unknown error"))
+
+            pages = dict(crawl.get("scraped_pages", {}))
+            # Merge existing saved snapshot so all canonical pages are guaranteed present
+            if isinstance(saved_snapshot, dict):
+                for u, p in saved_snapshot.items():
+                    if u not in pages and (p.get("content") or "").strip():
+                        pages[u] = p
         scraper_status.phase = "comparing"
         scraper_status.status_message = f"Checking {len(pages)} page(s) for content updates..."
 

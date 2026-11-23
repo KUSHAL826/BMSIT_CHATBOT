@@ -104,7 +104,7 @@ def create_app():
                         indexed_count, auto_scrape
                     )
                     from app.services.scheduler_service import execute_bmsit_scrape_and_index
-                    execute_bmsit_scrape_and_index(is_scheduled=True, trigger_label="Startup Auto-Recovery")
+                    execute_bmsit_scrape_and_index(is_scheduled=True, trigger_label="Startup Auto-Recovery", force=True)
             except Exception as ex:
                 logging.getLogger(__name__).warning("[Startup] Auto-crawl error: %s", ex)
 

@@ -641,7 +641,7 @@ def _get_persistent_website_knowledge():
                         "file_type": "web",
                         "status": "Indexed",
                         "chunk_count": 0,
-                        "date": now_ist_str(),
+                        "date": page.get("last_seen") or "Pre-scraped snapshot",
                         "chars": len(text),
                         "changes": f"{len(text):,} chars" if text else "Indexed",
                         "text": text[:500],
