@@ -225,6 +225,7 @@ jobs:
               --connect-timeout 10 \
               --max-time 30 \
               -H "X-Admin-Key: ${ADMIN_PASSWORD}" \
+              -H "X-Trigger: GitHub Actions Workflow" \
               -H "Accept: application/json" \
               -o "$STATUS_FILE" \
               -w "%{http_code}" \
@@ -383,6 +384,7 @@ jobs:
             --connect-timeout 10 \
             --max-time 30 \
             -H "X-Admin-Key: ${ADMIN_PASSWORD}" \
+            -H "X-Trigger: GitHub Actions Workflow" \
             -H "Accept: application/json" \
             "${RENDER_APP_URL}/api/admin/scrape/status" > scraped_metadata/latest_scrape_status.json || echo '{"status": "completed"}' > scraped_metadata/latest_scrape_status.json
 
