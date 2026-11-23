@@ -44,44 +44,14 @@ def _progress(prefix):
 
 def _plan_slices(chunks_by_key):
     """
-    Groups changed items into commit slices.
-
-    Returns (slices, deferred, empty):
-      slices   - lists of item keys embedded and committed together
-      deferred - keys left out because the per-run chunk cap was reached
-      empty    - keys that yielded no chunks at all (nothing to embed)
-
-    `empty` exists so those items are reported instead of disappearing. They
-    previously fell through every counter, which is why a run could claim 717
-    changed pages, 0 embedded and only 85 deferred: the remainder produced no
-    chunks and was silently dropped from the arithmetic.
+    Groups all changed items into a single unified slice so the entire website
+    is embedded in one single operation at once.
     """
-    slice_target = min(50, max(1, Config.EMBED_COMMIT_SLICE_CHUNKS))
-    run_cap = Config.EMBED_MAX_CHUNKS_PER_RUN or 0
-
-    slices, deferred, empty = [], [], []
-    current, current_count, budget_used = [], 0, 0
-
-    for key, chunks in chunks_by_key.items():
-        count = len(chunks)
-        if not count:
-            empty.append(key)
-            continue
-        if run_cap and budget_used + count > run_cap and budget_used > 0:
-            deferred.append(key)
-            continue
-
-        current.append(key)
-        current_count += count
-        budget_used += count
-
-        if current_count >= slice_target:
-            slices.append(current)
-            current, current_count = [], 0
-
-    if current:
-        slices.append(current)
-    return slices, deferred, empty
+    all_keys = [k for k, chunks in chunks_by_key.items() if len(chunks) > 0]
+    empty = [k for k, chunks in chunks_by_key.items() if len(chunks) == 0]
+    if all_keys:
+        return [all_keys], [], empty
+    return [], [], empty
 
 
 def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=False):
@@ -119,11 +89,12 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
         from app.services.fsutil import read_json
         saved_snapshot = read_json(content_file, default={}) or {}
 
-        # FAST FORCE RE-EMBED: If force=True and snapshot exists, skip redundant network crawl
-        # and embed all canonical pages directly into Supabase & FAISS
-        if force and isinstance(saved_snapshot, dict) and len(saved_snapshot) >= 50:
-            logger.info("[Delta] Force re-embed requested with %d snapshot pages. Proceeding straight to chunking & embedding...", len(saved_snapshot))
-            pages = dict(saved_snapshot)
+        # 1. Base knowledge: all canonical pages from bmsit_web_content.json
+        pages = dict(saved_snapshot) if isinstance(saved_snapshot, dict) else {}
+
+        # 2. If force=True and snapshot has pages, proceed straight to embedding without crawler delay!
+        if force and len(pages) >= 50:
+            logger.info("[Delta] Force embed active with %d pre-scraped pages. Embedding all at once...", len(pages))
             crawl = {"status": "success", "scraped_pages": pages, "changes": []}
         else:
             scraper = WebsiteScraper(
@@ -132,16 +103,11 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
                 max_depth=int(os.getenv("SCRAPE_DEPTH") or Config.SCRAPE_DEPTH),
             )
             crawl = scraper.run_sync(keep_running_for_indexing=True)
-
-            if crawl.get("status") != "success":
+            if crawl.get("status") == "success":
+                pages.update(crawl.get("scraped_pages", {}))
+            elif not pages:
                 return _crawl_failed(rag, source_id, crawl.get("message", "unknown error"))
 
-            pages = dict(crawl.get("scraped_pages", {}))
-            # Merge existing saved snapshot so all canonical pages are guaranteed present
-            if isinstance(saved_snapshot, dict):
-                for u, p in saved_snapshot.items():
-                    if u not in pages and (p.get("content") or "").strip():
-                        pages[u] = p
         scraper_status.phase = "comparing"
         scraper_status.status_message = f"Checking {len(pages)} page(s) for content updates..."
 
