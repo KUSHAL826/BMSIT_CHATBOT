@@ -1374,9 +1374,15 @@ def trigger_scrape_now():
         or request.headers.get("X-Force") == "true"
     )
 
+    reembed_only_flag = (
+        str(request.args.get("reembed_only", "")).lower() in ("true", "1", "yes")
+        or str((request.get_json(silent=True) or {}).get("reembed_only", "")).lower() in ("true", "1", "yes")
+        or str(request.args.get("action", "")).lower() == "reembed"
+    )
+
     if scraper_status.is_running:
-        if force_flag:
-            logging.getLogger(__name__).info("[Admin] Overriding running scraper status for force re-embed.")
+        if force_flag or reembed_only_flag:
+            logging.getLogger(__name__).info("[Admin] Overriding running scraper status for force re-run.")
             scraper_status.is_running = False
         else:
             return jsonify({
@@ -1388,7 +1394,8 @@ def trigger_scrape_now():
         execute_bmsit_scrape_and_index(
             is_scheduled=(trigger_name != "Manual run"),
             trigger_label=trigger_name,
-            force=force_flag
+            force=force_flag,
+            reembed_only=reembed_only_flag
         )
 
     t = threading.Thread(

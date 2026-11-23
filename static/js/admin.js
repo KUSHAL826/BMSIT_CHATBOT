@@ -83,11 +83,11 @@ async function triggerScrapeNow(force = false) {
   fillBar.style.width = "15%";
 
   try {
-    const url = force ? "/api/admin/scrape?force=true" : "/api/admin/scrape";
+    const url = force ? "/api/admin/scrape?force=true&reembed_only=true" : "/api/admin/scrape";
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ force: !!force, trigger: force ? "Force Re-embed All Pages" : "Manual run" })
+      body: JSON.stringify({ force: !!force, reembed_only: !!force, trigger: force ? "Force Re-embed All Pages" : "Manual run" })
     });
     const data = await res.json();
     if (res.ok) {

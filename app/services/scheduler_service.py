@@ -22,9 +22,9 @@ scheduler = BackgroundScheduler(daemon=True)
 JOB_ID = "bmsit_daily_delta_scrape"
 
 
-def execute_bmsit_scrape_and_index(is_scheduled=False, trigger_label=None, force=False):
+def execute_bmsit_scrape_and_index(is_scheduled=False, trigger_label=None, force=False, reembed_only=False):
     """Kept as the public entry point used by routes, tests and the cron job."""
-    return run_website_delta_ingestion(is_scheduled=is_scheduled, trigger_label=trigger_label, force=force)
+    return run_website_delta_ingestion(is_scheduled=is_scheduled, trigger_label=trigger_label, force=force, reembed_only=reembed_only)
 
 
 class SchedulerService:

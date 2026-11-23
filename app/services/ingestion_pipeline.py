@@ -54,7 +54,7 @@ def _plan_slices(chunks_by_key):
     return [], [], empty
 
 
-def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=False):
+def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=False, reembed_only=False):
     """Crawls the college website and embeds only what changed (or everything if force=True)."""
     if scraper_status.is_running and not force:
         logger.warning("[Delta] A crawl/ingestion job is already running; skipping concurrent invocation.")
@@ -92,11 +92,13 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
         # 1. Base knowledge: all canonical pages from bmsit_web_content.json
         pages = dict(saved_snapshot) if isinstance(saved_snapshot, dict) else {}
 
-        # 2. If force=True and snapshot has pages, proceed straight to embedding without crawler delay!
-        if force and len(pages) >= 50:
-            logger.info("[Delta] Force embed active with %d pre-scraped pages. Embedding all at once...", len(pages))
+        # 2. Live crawl & scrape: crawl the official website to discover and scrape live pages
+        if reembed_only and len(pages) >= 50:
+            logger.info("[Delta] Re-embed only active with %d pre-scraped pages. Skipping crawler...", len(pages))
             crawl = {"status": "success", "scraped_pages": pages, "changes": []}
         else:
+            logger.info("[Delta] Live crawler active for %s (depth=%s, max_pages=%s). Scraping site...",
+                        target_url, Config.SCRAPE_DEPTH, Config.SCRAPE_MAX_PAGES)
             scraper = WebsiteScraper(
                 base_url=target_url,
                 max_pages=int(os.getenv("SCRAPE_MAX_PAGES") or Config.SCRAPE_MAX_PAGES),
@@ -820,3 +822,7 @@ def purge_source(source_id, source_type):
                 logger.warning("[Delta] Could not remove crawl snapshot: %s", e)
 
     return removed_chunks
+
+
+# Public alias for routes and scheduled tasks
+execute_bmsit_scrape_and_index = run_website_delta_ingestion

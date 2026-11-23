@@ -140,7 +140,7 @@ jobs:
           set -euo pipefail
 
           RENDER_APP_URL="${RENDER_APP_URL%/}"
-          SCRAPE_URL="${RENDER_APP_URL}/api/admin/scrape?force=true"
+          SCRAPE_URL="${RENDER_APP_URL}/api/admin/scrape"
           RESPONSE_FILE="$(mktemp)"
 
           trap 'rm -f "$RESPONSE_FILE"' EXIT
