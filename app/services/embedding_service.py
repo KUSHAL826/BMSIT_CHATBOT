@@ -475,15 +475,24 @@ class EmbeddingService:
                 result, provider = None, None
 
                 if self.remote_backend.available():
-                    result = await self.remote_backend.embed_batch(batch_texts, "RETRIEVAL_DOCUMENT")
-                    provider = self.remote_backend.provider_id
+                    try:
+                        result = await self.remote_backend.embed_batch(batch_texts, "RETRIEVAL_DOCUMENT")
+                        provider = self.remote_backend.provider_id
+                    except Exception as err:
+                        logger.warning("[Embeddings] Remote embed batch error: %s. Using local fallback.", err)
+                        result = None
 
                 if result is None:
                     if not allow_local_fallback:
                         exhausted["hit"] = True
                         return
-                    result = await self.local.embed_batch(batch_texts, "RETRIEVAL_DOCUMENT")
-                    provider = self.local.provider_id
+                    try:
+                        result = await self.local.embed_batch(batch_texts, "RETRIEVAL_DOCUMENT")
+                        provider = self.local.provider_id
+                    except Exception as loc_err:
+                        logger.error("[Embeddings] Local fallback error: %s", loc_err)
+                        exhausted["hit"] = True
+                        return
 
                 for row, index in enumerate(indices):
                     vectors[index] = result[row]
@@ -498,7 +507,15 @@ class EmbeddingService:
 
         await asyncio.gather(*(run_batch(batch) for batch in batches))
 
-        if exhausted["hit"] or any(v is None for v in vectors):
+        # Fill any remaining None vectors if local fallback is allowed
+        if allow_local_fallback and any(v is None for v in vectors):
+            for i in range(len(vectors)):
+                if vectors[i] is None:
+                    fb_res = await self.local.embed_batch([prepared[i]], "RETRIEVAL_DOCUMENT")
+                    vectors[i] = fb_res[0]
+                    providers[i] = self.local.provider_id
+
+        if not allow_local_fallback and (exhausted["hit"] or any(v is None for v in vectors)):
             keys = self.pool.configured_count()
             if self.pool.network_error_count() and not self.pool.quota_hit_count():
                 raise BackendUnreachable(

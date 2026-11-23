@@ -85,21 +85,29 @@ def create_app():
         else:
             logging.getLogger(__name__).info("[App] Cloud Cron disabled. Scheduled delta crawl runs via GitHub Actions on Fridays.")
 
-        # Automated background delta scrape on server startup / container deployment (disabled by default)
+        # Automated background delta scrape on server startup / container deployment
+        # Runs if explicitly enabled OR as auto-recovery if the website knowledge store is incomplete (< 50 pages)
         auto_scrape = getattr(Config, "AUTO_SCRAPE_ON_STARTUP", False)
-        if auto_scrape:
-            import threading
-            import time
-            from app.services.scheduler_service import execute_bmsit_scrape_and_index
+        import threading
+        import time
 
-            def _background_startup_crawl():
-                time.sleep(15)  # allow web server to bind port and serve traffic first
-                try:
-                    logging.getLogger(__name__).info("[Startup] Initiating automated background delta scrape & embedding...")
-                    execute_bmsit_scrape_and_index(is_scheduled=True, trigger_label="Startup Auto-Crawl")
-                except Exception as ex:
-                    logging.getLogger(__name__).warning("[Startup] Auto-crawl error: %s", ex)
+        def _background_startup_crawl():
+            time.sleep(15)  # allow web server to bind port and serve traffic first
+            try:
+                from app.services.rag_service import RAGService
+                from app.services.knowledge_store import KnowledgeStore
+                rag = RAGService.get_instance()
+                indexed_count = len(rag.source_item_keys(KnowledgeStore.WEBSITE_SOURCE_ID))
+                if auto_scrape or indexed_count < 50:
+                    logging.getLogger(__name__).info(
+                        "[Startup] Auto-recovery active (indexed_pages=%d < 50 or auto_scrape=%s). Ingesting remaining website pages...",
+                        indexed_count, auto_scrape
+                    )
+                    from app.services.scheduler_service import execute_bmsit_scrape_and_index
+                    execute_bmsit_scrape_and_index(is_scheduled=True, trigger_label="Startup Auto-Recovery")
+            except Exception as ex:
+                logging.getLogger(__name__).warning("[Startup] Auto-crawl error: %s", ex)
 
-            threading.Thread(target=_background_startup_crawl, daemon=True, name="StartupAutoCrawl").start()
+        threading.Thread(target=_background_startup_crawl, daemon=True, name="StartupAutoCrawl").start()
 
     return app

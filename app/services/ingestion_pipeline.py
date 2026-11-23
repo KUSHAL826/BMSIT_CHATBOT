@@ -86,6 +86,10 @@ def _plan_slices(chunks_by_key):
 
 def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=False):
     """Crawls the college website and embeds only what changed (or everything if force=True)."""
+    if scraper_status.is_running:
+        logger.warning("[Delta] A crawl/ingestion job is already running; skipping concurrent invocation.")
+        return {"status": "busy", "message": "Scrape already running"}
+
     source_id = KnowledgeStore.WEBSITE_SOURCE_ID
     source_label = KnowledgeStore.WEBSITE_SOURCE_NAME
 
@@ -333,9 +337,9 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
                     stale_chunk_ids=IngestionRegistry.chunk_ids_for_keys(source_id, slice_urls),
                     progress_callback=_progress(f"Embedding batch {slice_index}/{len(planned)}"),
                 )
-            except EmbeddingUnavailable as e:
+            except Exception as e:
                 logger.warning(
-                    "[Delta] Remote API limit reached on batch %s: %s. Using local fallback so all pages are embedded...",
+                    "[Delta] Remote API limit reached or error on batch %s: %s. Using local fallback so all pages are embedded...",
                     slice_index, e
                 )
                 try:
@@ -347,13 +351,8 @@ def run_website_delta_ingestion(is_scheduled=False, trigger_label=None, force=Fa
                         progress_callback=_progress(f"Embedding batch {slice_index}/{len(planned)} (local fallback)"),
                     )
                 except Exception as fb_err:
-                    logger.error("[Delta] Fallback failed for slice %s: %s", slice_index, fb_err)
-                    deferred.extend(url for group in planned[slice_index - 1:] for url in group)
-                    quota_message = str(e)
-                    blocked_by_network = isinstance(e, BackendUnreachable)
-                    blocked_by_budget = isinstance(e, BudgetExhausted)
-                    logger.warning("[Delta] Stopping early on fatal error: %s", fb_err)
-                    break
+                    logger.error("[Delta] Fallback error for slice %s: %s. Continuing with next slice...", slice_index, fb_err)
+                    update = {"added": 0, "removed": 0, "total": rag.count_source_chunks(source_id), "chunk_ids": []}
 
             added += update["added"]
             replaced += update["removed"]

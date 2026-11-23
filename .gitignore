@@ -3,6 +3,8 @@
 
 # Runtime data: index, knowledge store, registry, uploads
 data/
+!data/scraped/
+!data/scraped/bmsit_web_content.json
 scratch/
 
 # Python

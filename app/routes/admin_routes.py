@@ -619,12 +619,47 @@ def _get_persistent_website_knowledge():
     except Exception as e:
         print(f"[Admin] Supabase website pages read error: {e}")
 
+    # 4. Scraped web pages snapshot (bmsit_web_content.json / scrape_state.json)
+    try:
+        from app.services.fsutil import read_json
+        content_file = Config.SCRAPED_DIR / "bmsit_web_content.json"
+        content_pages = read_json(content_file, default={}) or {}
+        if isinstance(content_pages, dict):
+            for url, page in content_pages.items():
+                if url and url not in pages_map:
+                    pid = "web-" + hashlib.md5(url.encode("utf-8")).hexdigest()[:10]
+                    title = _clean_page_title(page.get("title"), url)
+                    text = page.get("content", "") or ""
+                    pages_map[url] = {
+                        "id": pid,
+                        "source_id": KnowledgeStore.WEBSITE_SOURCE_ID,
+                        "item_key": url,
+                        "url": url,
+                        "title": title,
+                        "source": title,
+                        "source_type": "website",
+                        "file_type": "web",
+                        "status": "Indexed",
+                        "chunk_count": 0,
+                        "date": now_ist_str(),
+                        "chars": len(text),
+                        "changes": f"{len(text):,} chars" if text else "Indexed",
+                        "text": text[:500],
+                    }
+    except Exception as e:
+        print(f"[Admin] Scraped web content read notice: {e}")
+
     # Assign deduplicated chunk count to each page
     for url, p in pages_map.items():
-        p["chunk_count"] = len(page_chunk_ids.get(url, set()))
+        cnt = len(page_chunk_ids.get(url, set()))
+        p["chunk_count"] = cnt
+        if cnt > 0:
+            p["status"] = "Indexed"
+        elif p.get("status") != "Processing":
+            p["status"] = "Scraped"
 
-    # STRICT FILTER: Show ONLY pages that are both scraped AND successfully embedded into the vector database
-    pages = [p for p in pages_map.values() if p.get("chunk_count", 0) > 0]
+    # Display all legitimate crawled and indexed college web pages
+    pages = list(pages_map.values())
 
     # Populate category classification
     for p in pages:

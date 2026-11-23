@@ -473,8 +473,7 @@ class RAGService:
             deduped_chunks, _ = self.dedupe_chunks(source_id, new_chunks, replace_keys, replace_all)
             for chunk in deduped_chunks:
                 cid = chunk.get("chunk_id")
-                digest = self._dedupe_key(chunk)
-                if cid in existing_ids or digest in existing_digests:
+                if cid in existing_ids:
                     continue
                 filtered_chunks.append(chunk)
 
