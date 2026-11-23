@@ -670,6 +670,24 @@ class WebsiteScraper:
                     card_text = f"\nMember: {name_el.get_text().strip()} | Role: {role_el.get_text().strip()}\n"
                     card.replace_with(soup.new_string(card_text))
 
+            # Preserve HTML tables as structured Markdown tables before decomposing layout tags
+            # This ensures patent details, faculty lists, timetables, and fee structures maintain column relationships
+            for table in soup.find_all("table"):
+                rows = table.find_all("tr")
+                if not rows:
+                    continue
+                md_rows = []
+                for r_idx, row in enumerate(rows):
+                    cols = [re.sub(r'\s+', ' ', c.get_text().strip()) for c in row.find_all(["th", "td"])]
+                    if not any(cols):
+                        continue
+                    md_rows.append("| " + " | ".join(cols) + " |")
+                    if r_idx == 0:
+                        md_rows.append("| " + " | ".join(["---"] * len(cols)) + " |")
+                if md_rows:
+                    table_md = "\n\n" + "\n".join(md_rows) + "\n\n"
+                    table.replace_with(soup.new_string(table_md))
+
             # Strip non-content and layout boilerplate tags (never include images, photos, videos, or media)
             for tag in soup(["script", "style", "noscript", "iframe", "svg", "header", "footer", "nav", "aside", "form", "img", "video", "audio", "canvas", "picture", "figure", "source"]):
                 tag.decompose()
@@ -691,33 +709,30 @@ class WebsiteScraper:
             title = ""
             h1 = soup.find("h1")
             slug = urlparse(effective_url).path.strip("/").replace(".php", "").replace("-", " ").title()
-            slug_words = set(re.findall(r"\w+", slug.lower()))
+            slug_lower = slug.lower().strip()
+
+            acronym_titles = {
+                "ipc": "Intellectual Property (IP) Cell",
+                "hefc": "Higher Education Facilitation Center (HEFC)",
+                "iqac": "Internal Quality Assurance Cell (IQAC)",
+                "naac": "National Assessment and Accreditation Council (NAAC)",
+                "nirf": "National Institutional Ranking Framework (NIRF)",
+                "nba dcp": "National Board of Accreditation (NBA)",
+                "mou": "Memorandums of Understanding (MOU)",
+                "cicc": "College Internal Complaints Committee (CICC)",
+                "nss": "National Service Scheme (NSS)",
+                "ncc": "National Cadet Corps (NCC)",
+                "bicep incubation centre": "BICEP Incubation Centre",
+                "aicte idea lab": "AICTE IDEA Lab",
+                "graduation day": "Graduation Day",
+            }
 
             h1_txt = h1.get_text().strip() if h1 else ""
-            h1_words = set(re.findall(r"\w+", h1_txt.lower()))
-            overlap = slug_words.intersection(h1_words)
-
-            # Detect copy-paste template flaw: if <h1> has zero semantic overlap with the URL slug
-            # (e.g. <h1>Hostel Facilities</h1> on /idea-lab.php), find a matching heading in <h2>/<h3>
-            if h1 and not overlap and slug_words:
-                matched_subheading = None
-                for sub_h in soup.find_all(["h2", "h3"]):
-                    sub_txt = sub_h.get_text().strip()
-                    sub_words = set(re.findall(r"\w+", sub_txt.lower()))
-                    if slug_words.intersection(sub_words):
-                        matched_subheading = sub_txt
-                        break
-                if matched_subheading:
-                    logger.info("[Scraper] Detected template heading mismatch on %s: replacing '%s' with '%s'", effective_url, h1_txt, matched_subheading)
-                    h1.decompose()
-                    h1_txt = matched_subheading
-                else:
-                    h1.decompose()
-                    h1_txt = slug
-
-            if "placement" in slug.lower() and "contact" in slug.lower():
+            if slug_lower in acronym_titles:
+                title = f"BMSIT {acronym_titles[slug_lower]}"
+            elif "placement" in slug_lower and "contact" in slug_lower:
                 title = "BMSIT Placement Team Contact Details"
-            elif slug.lower() == "contact details":
+            elif slug_lower == "contact details":
                 title = "BMSIT College Main Office Contact Details"
             elif h1_txt:
                 if slug and slug.lower() not in h1_txt.lower():
