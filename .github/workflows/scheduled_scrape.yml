@@ -29,9 +29,19 @@ jobs:
       # STEP 0: CHECKOUT REPOSITORY
       # ==========================================
       - name: Checkout Repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "=========================================="
+          echo "BMSIT SCRAPER: NATIVE GIT CHECKOUT"
+          echo "=========================================="
+          git init
+          git remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git"
+          git fetch --depth=1 origin main
+          git checkout -B main FETCH_HEAD
+          echo "Repository checked out successfully at $(git rev-parse --short HEAD)"
 
       # ==========================================
       # STEP 1: VALIDATE CONFIGURATION
@@ -392,6 +402,7 @@ jobs:
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git remote set-url origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git" || true
           git fetch origin main || true
           git checkout main || true
           git pull --rebase origin main || true
