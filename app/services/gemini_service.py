@@ -73,26 +73,32 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
      * If a specific administrative sub-detail (such as exact online transaction steps or portal URLs) is not recorded in the context, do NOT refuse the entire query! Provide all the verified facts you have (e.g. describe the facility, room types, and fees), and clearly note that the specific fee payment steps/drafts should be confirmed directly with the college accounts/admissions office.
      * NEVER issue a blanket refusal when partial information exists in the knowledge base.
 
-5. GRACEFUL MISSING INFORMATION PROTOCOL (STRICT REFUSAL RULE):
+5. DOWNLOADABLE DOCUMENT & PDF PAGE LINK DIRECTIVE (GENERIC RULE):
+   - When the user asks for specific detailed data that is not directly present as text in the provided context, BUT the context indicates that a downloadable PDF or document is available on the website (or the page in the context hosts the PDF for that information):
+     * State clearly that the complete detailed document/file is available on the official webpage.
+     * Provide the direct clickable markdown link to the official BMSIT webpage from the context header where that document/PDF is hosted (e.g., [Page Title](URL)).
+     * Do NOT invent or fabricate any URL; use ONLY the exact page URL provided in the context header (e.g., `--- Source: ... | https://... ---`).
+
+6. GRACEFUL MISSING INFORMATION PROTOCOL (STRICT REFUSAL RULE):
    - If—and ONLY if—the entire requested topic, facility, or entity is genuinely and completely ABSENT from the provided context:
      * Do NOT guess or substitute unrelated departments or generic pages.
      * State clearly and courteously:
        "As of now, I don't have verified information regarding this in the BMSIT knowledge base. Please refer to https://bmsit.ac.in or contact the college directly:"
      * Provide the official college contact points:
-       • Email: admissions@bmsit.in / principal@bmsit.in
-       • Phone: +91-80-68730444 / +91-80-68730424
+       • Email: principal@bmsit.in
+       • Phone: 080-26146800
        • Website: https://bmsit.ac.in
        • Campus Address: Doddaballapur Main Road, Avalahalli, Yelahanka, Bengaluru - 560064
 
-6. CONVERSATIONAL CONTINUITY (MULTI-TURN MEMORY):
+7. CONVERSATIONAL CONTINUITY (MULTI-TURN MEMORY):
    - Maintain seamless context across turns using the conversation history.
    - Resolve pronouns ("he", "she", "it", "they", "this department", "that course") based on prior discussion.
 
-7. DYNAMIC VERIFICATION & RECENCY:
+8. DYNAMIC VERIFICATION & RECENCY:
    - Extract all facts, names of faculty, HODs, associate heads, department divisions/clusters, fees, and dates DYNAMICALLY and EXCLUSIVELY from the provided context.
    - Prioritize the most recently updated verified passage when records differ.
 
-8. HIGHLIGHT MAIN POINTS & CORE ENTITIES IN BOLD (STRICT MANDATORY RULE):
+9. HIGHLIGHT MAIN POINTS & CORE ENTITIES IN BOLD (STRICT MANDATORY RULE):
    - You MUST highlight the main points, crucial facts, names, designations, dates, numbers, cutoffs, exam names, branches, and vital takeaways in **bold** markdown throughout the response.
    - For bullet lists, structure each bullet to begin with the main point or entity in **bold**:
      * **[Key Point / Entity / Name]**: [Detailed explanation or verified facts]
@@ -102,7 +108,7 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
      * **Eligibility Criteria**: Must have passed 10+2 with minimum **45%** aggregate in Physics, Mathematics, and Chemistry/Bio/CS.
    - In paragraph text, bold essential terms and takeaways so readers can immediately scan the central facts.
 
-9. LASER-FOCUSED SCOPE & ZERO TOPIC CONTAMINATION (STRICT ANTI-CROSS-POLLUTION RULE):
+10. LASER-FOCUSED SCOPE & ZERO TOPIC CONTAMINATION (STRICT ANTI-CROSS-POLLUTION RULE):
    - You must answer ONLY the specific topic the user inquired about.
    - STRICT ENTITY ISOLATION:
      * When the user asks about Hostel (e.g. fees, wardens, rooms, payment procedure), do NOT mention general college admissions, CET codes, or management quota procedures!
@@ -346,8 +352,8 @@ class GeminiService:
                     "The BMSIT knowledge base is currently empty, so I have nothing verified to answer from. "
                     "An administrator needs to run a website crawl or upload documents from the admin dashboard.\n\n"
                     "In the meantime, please contact the college directly:\n"
-                    "• **Email**: `admissions@bmsit.in` / `principal@bmsit.in`\n"
-                    "• **Phone**: +91-80-68730444 / +91-80-68730424\n"
+                    "• **Email**: `principal@bmsit.in`\n"
+                    "• **Phone**: 080-26146800\n"
                     "• **Website**: [https://bmsit.ac.in](https://bmsit.ac.in)"
                 )
                 history_mgr.append_turn(session_id, user_message, empty_reply)
@@ -602,11 +608,18 @@ class GeminiService:
         if not keys_list:
             raise RuntimeError("No Gemini API keys configured.")
 
+        pdf_directive = (
+            " If the specific detailed text data requested by the user is not present in the context "
+            "but a downloadable document or PDF for it is available on the website, state that the document/PDF is available "
+            "and provide the direct clickable link to the official BMSIT page from the context header where the document/PDF is hosted."
+        )
+
         if is_first_turn:
             answer_guideline = (
                 "Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. "
                 "If you include an opening greeting or welcome, keep it strictly to 1 line. "
                 "HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**."
+                f"{pdf_directive}"
             )
         else:
             answer_guideline = (
@@ -614,6 +627,7 @@ class GeminiService:
                 "DO NOT include any greeting (NO 'Hello', 'Hi', 'Greetings', 'Welcome to BMSIT', etc.) or introductory pleasantries. "
                 "Start IMMEDIATELY with the direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. "
                 "HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**."
+                f"{pdf_directive}"
             )
 
         user_prompt = f"""KNOWLEDGE BASE CONTEXT (From BMSIT official website and verified college records via FAISS index):
@@ -740,8 +754,8 @@ ANSWER ({answer_guideline}):"""
         unknown_message = (
             "As of now, I don't have verified information regarding this in the BMSIT knowledge base. "
             "Please refer to https://bmsit.ac.in or contact the college directly:\n"
-            "• **Email**: admissions@bmsit.in / principal@bmsit.in\n"
-            "• **Phone**: +91-80-68730444 / +91-80-68730424\n"
+            "• **Email**: principal@bmsit.in\n"
+            "• **Phone**: 080-26146800\n"
             "• **Website**: https://bmsit.ac.in\n"
             "• **Address**: Doddaballapur Main Road, Avalahalli, Yelahanka, Bengaluru - 560064"
         )
