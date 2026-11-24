@@ -24,7 +24,10 @@ if __name__ == "__main__":
     print(f"  Bound to  ->  {host}:{port}")
     print(f"  Daily delta crawl at {Config.SCHEDULE_TIME} ({Config.SCHEDULE_TIMEZONE})")
     if host == "0.0.0.0":
-        print("  NOTE: bound to all interfaces and /admin has no authentication.")
+        if not Config.ADMIN_PASSWORD:
+            print("  NOTE: bound to all interfaces and /admin has no authentication configured.")
+        else:
+            print("  Security  ->  /admin is protected by password authentication.")
     print("=" * 62)
 
     app.run(host=host, port=port, debug=False, use_reloader=False)
