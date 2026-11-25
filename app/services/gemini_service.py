@@ -40,7 +40,8 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
 =======================================================
 
 1. EXCLUSIVE KNOWLEDGE-BASE GROUNDING & FAISS RETRIEVAL (STRICT RULE):
-   - You must answer ONLY using the provided BMSIT knowledge base context and verified records retrieved from the FAISS vector index.
+   - You must answer ONLY using the provided BMSIT&M knowledge base context and verified records retrieved from the FAISS vector index.
+   - Always refer to the institution as **BMSIT&M** (never just "BMSIT") in your responses.
    - ZERO EXTERNAL HALLUCINATION: Under NO circumstance may you fabricate, speculate, extrapolate, or guess dates, admission cutoffs, fee structures, faculty names, or policies not documented in the context.
    - Every factual claim must be substantiated by the provided context.
 
@@ -76,14 +77,14 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
 5. DOWNLOADABLE DOCUMENT & PDF PAGE LINK DIRECTIVE (GENERIC RULE):
    - When the user asks for specific detailed data that is not directly present as text in the provided context, BUT the context indicates that a downloadable PDF or document is available on the website (or the page in the context hosts the PDF for that information):
      * State clearly that the complete detailed document/file is available on the official webpage.
-     * Provide the direct clickable markdown link to the official BMSIT webpage from the context header where that document/PDF is hosted (e.g., [Page Title](URL)).
+     * Provide the direct clickable markdown link to the official BMSIT&M webpage from the context header where that document/PDF is hosted (e.g., [Page Title](URL)).
      * Do NOT invent or fabricate any URL; use ONLY the exact page URL provided in the context header (e.g., `--- Source: ... | https://... ---`).
 
 6. GRACEFUL MISSING INFORMATION PROTOCOL (STRICT REFUSAL RULE):
    - If—and ONLY if—the entire requested topic, facility, or entity is genuinely and completely ABSENT from the provided context:
      * Do NOT guess or substitute unrelated departments or generic pages.
      * State clearly and courteously:
-       "As of now, I don't have verified information regarding this in the BMSIT knowledge base. Please refer to https://bmsit.ac.in or contact the college directly:"
+       "As of now, I don't have verified information regarding this in the BMSIT&M knowledge base. Please refer to https://bmsit.ac.in or contact the college directly:"
      * Provide the official college contact points:
        • Email: principal@bmsit.in
        • Phone: 080-26146800
@@ -119,16 +120,16 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
 10. DYNAMIC ADAPTIVE LENGTH & PROPORTIONALITY:
    - Form and calibrate the answer length strictly based on the user's question:
      * For specific factual or multi-part questions (e.g. 'tell me about boys hostel and its fee payment procedure'): Focus directly on the requested facts (e.g. room types, fees, bank account details, payment steps). Present a clean, well-organized response without dumping irrelevant minutiae, kitchen appliances, or unrelated trivia.
-     * For exhaustive roster requests (e.g. 'name all faculties of bmsit', 'list all cse professors'): Provide the full enumeration with bold names and designations.
+     * For exhaustive roster requests (e.g. 'name all faculties of bmsit&m', 'list all cse professors'): Provide the full enumeration with bold names and designations.
      * For brief/short constraints (e.g. 'briefly', 'in 1 line'): Strictly adhere to the requested length.
 
 11. GREETING RULES (FIRST CHAT ONLY) & CONCISE CONCLUSIONS:
    - FIRST CHAT ONLY GREETING POLICY (STRICT MANDATORY RULE):
      * You may ONLY include a polite opening greeting or welcome pleasantry on the VERY FIRST message of a conversation session (Turn 1).
-     * On all subsequent / follow-up messages in an ongoing conversation: NEVER greet the user (NO 'Hello', 'Hi', 'Greetings', 'Welcome to BMSIT', etc.) and do NOT re-introduce yourself. Start your response IMMEDIATELY with the direct answer!
+     * On all subsequent / follow-up messages in an ongoing conversation: NEVER greet the user (NO 'Hello', 'Hi', 'Greetings', 'Welcome to BMSIT&M', etc.) and do NOT re-introduce yourself. Start your response IMMEDIATELY with the direct answer!
    - USER STANDALONE GREETING PROTOCOL: When the user explicitly sends a standalone greeting (e.g., "hi", "hello", "hey", "namaste", "good morning", "good evening") or asks who you are / what you can do:
      * Welcome them warmly and briefly as the official AI Assistant for BMSIT&M.
-     * Ask how you can assist them with BMSIT admissions, academics, faculty, placements, or campus info.
+     * Ask how you can assist them with BMSIT&M admissions, academics, faculty, placements, or campus info.
      * STRICT LENGTH CONSTRAINT: The entire greeting response MUST NOT EXCEED 3 LINES in total. Never output long boilerplate menus, lists of bullet points, or multi-paragraph templates for simple greetings.
    - CONCLUSION & FAREWELL PROTOCOL: When the user closes the conversation, says goodbye, or expresses thanks (e.g., "bye", "goodbye", "see you", "thank you", "thanks", "take care"):
      * Acknowledge politely, thank them, and wish them a wonderful day.
@@ -243,7 +244,7 @@ class GeminiService:
                 logger.warning(f"[Guardrail] Prompt injection attempt intercepted: {message}")
                 return False, (
                     "⚠️ **Security Notice**: Your query contains instructions that violate security guidelines. "
-                    "I am strictly programmed as the BMSIT College AI Assistant and cannot alter my guidelines or reveal internal configurations."
+                    "I am strictly programmed as the BMSIT&M College AI Assistant and cannot alter my guidelines or reveal internal configurations."
                 )
 
         # 2. Abusive / Foul / Harmful Language (with leetspeak, repeat characters, and de-spacing)
@@ -264,7 +265,7 @@ class GeminiService:
                 logger.warning(f"[Guardrail] Inappropriate language intercepted: {message}")
                 return False, (
                     "🕊️ **Community Guidelines**: We maintain a respectful, educational environment for students and visitors. "
-                    "Please keep interactions courteous. How may I assist you with information about BMSIT?"
+                    "Please keep interactions courteous. How may I assist you with information about BMSIT&M?"
                 )
 
         # Check for obvious external questions (recipes, generic coding, outside trivia)
@@ -280,7 +281,7 @@ class GeminiService:
         for signal in unrelated_signals:
             if re.search(signal, msg_lower):
                 return False, (
-                    "🎓 **BMSIT Assistant Focus**: I am specialized exclusively in providing verified information regarding "
+                    "🎓 **BMSIT&M Assistant Focus**: I am specialized exclusively in providing verified information regarding "
                     "**B.M.S. Institute of Technology and Management (BMSIT&M)** — such as our programs, admissions, faculty, placements, "
                     "hostels, and campus facilities. I cannot assist with general knowledge, external trivia, or unrelated tasks."
                 )
@@ -349,7 +350,7 @@ class GeminiService:
             if stats.get("total_chunks", 0) == 0:
                 logger.warning("[Gemini] Knowledge base is empty - no content has been indexed yet.")
                 empty_reply = (
-                    "The BMSIT knowledge base is currently empty, so I have nothing verified to answer from. "
+                    "The BMSIT&M knowledge base is currently empty, so I have nothing verified to answer from. "
                     "An administrator needs to run a website crawl or upload documents from the admin dashboard.\n\n"
                     "In the meantime, please contact the college directly:\n"
                     "• **Email**: `principal@bmsit.in`\n"
@@ -611,12 +612,12 @@ class GeminiService:
         pdf_directive = (
             " If the specific detailed text data requested by the user is not present in the context "
             "but a downloadable document or PDF for it is available on the website, state that the document/PDF is available "
-            "and provide the direct clickable link to the official BMSIT page from the context header where the document/PDF is hosted."
+            "and provide the direct clickable link to the official BMSIT&M page from the context header where the document/PDF is hosted."
         )
 
         if is_first_turn:
             answer_guideline = (
-                "Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. "
+                "Provide a direct, complete, accurate, and helpful response based STRICTLY on the BMSIT&M context above. "
                 "If you include an opening greeting or welcome, keep it strictly to 1 line. "
                 "HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**."
                 f"{pdf_directive}"
@@ -624,13 +625,13 @@ class GeminiService:
         else:
             answer_guideline = (
                 "CRITICAL CONVERSATION RULE: This is an ongoing conversation (not the first chat). "
-                "DO NOT include any greeting (NO 'Hello', 'Hi', 'Greetings', 'Welcome to BMSIT', etc.) or introductory pleasantries. "
-                "Start IMMEDIATELY with the direct, complete, accurate, and helpful response based STRICTLY on the BMSIT context above. "
+                "DO NOT include any greeting (NO 'Hello', 'Hi', 'Greetings', 'Welcome to BMSIT&M', etc.) or introductory pleasantries. "
+                "Start IMMEDIATELY with the direct, complete, accurate, and helpful response based STRICTLY on the BMSIT&M context above. "
                 "HIGHLIGHT ALL MAIN POINTS, KEY FACTS, NAMES, DESIGNATIONS, AND CRUCIAL DETAILS IN **BOLD**."
                 f"{pdf_directive}"
             )
 
-        user_prompt = f"""KNOWLEDGE BASE CONTEXT (From BMSIT official website and verified college records via FAISS index):
+        user_prompt = f"""KNOWLEDGE BASE CONTEXT (From BMSIT&M official website and verified college records via FAISS index):
 {context}
 
 USER QUESTION:
@@ -752,7 +753,7 @@ ANSWER ({answer_guideline}):"""
         q_lower = clean_query.lower()
 
         unknown_message = (
-            "As of now, I don't have verified information regarding this in the BMSIT knowledge base. "
+            "As of now, I don't have verified information regarding this in the BMSIT&M knowledge base. "
             "Please refer to https://bmsit.ac.in or contact the college directly:\n"
             "• **Email**: principal@bmsit.in\n"
             "• **Phone**: 080-26146800\n"
@@ -973,7 +974,7 @@ ANSWER ({answer_guideline}):"""
 
         formatted_answer = "\n\n".join(output_blocks)
         return (
-            f"Based on BMSIT verified official records:\n\n"
+            f"Based on BMSIT&M verified official records:\n\n"
             f"{formatted_answer}\n\n"
-            f"> *Source: BMSIT Official Records*"
+            f"> *Source: BMSIT&M Official Records*"
         )
