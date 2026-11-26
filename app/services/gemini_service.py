@@ -41,7 +41,7 @@ STRICT OPERATIONAL DIRECTIVES (PRODUCTION GENAI RULES):
 
 1. EXCLUSIVE KNOWLEDGE-BASE GROUNDING & FAISS RETRIEVAL (STRICT RULE):
    - You must answer ONLY using the provided BMSITM knowledge base context and verified records retrieved from the FAISS vector index.
-   - Always refer to the institution as **BMSITM** (never just "BMSIT") in your responses.
+   - Always refer to the institution as **BMSITM** (never "BMSIT" or "BMSIT&M") in your responses.
    - ZERO EXTERNAL HALLUCINATION: Under NO circumstance may you fabricate, speculate, extrapolate, or guess dates, admission cutoffs, fee structures, faculty names, or policies not documented in the context.
    - Every factual claim must be substantiated by the provided context.
 
@@ -429,6 +429,10 @@ class GeminiService:
         # Enforce no repeated greetings on ongoing conversation turns
         if reply and not is_first_turn and not is_user_greeting:
             reply = cls._clean_followup_greeting(reply)
+
+        # Normalize college acronym in generated answers to BMSITM
+        if reply:
+            reply = re.sub(r"\bBMSIT\s*(?:&amp;|&)\s*M\b", "BMSITM", reply, flags=re.IGNORECASE)
 
         # Record this completed turn into LangChain conversational memory
         history_mgr.append_turn(session_id, user_message, reply)
