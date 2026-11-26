@@ -161,10 +161,10 @@
         link.href = source.url;
         link.target = "_blank";
         link.rel = "noopener noreferrer";
-        link.textContent = source.name || "BMSIT&M source";
+        link.textContent = source.name || "BMSITM source";
         name.appendChild(link);
       } else {
-        name.textContent = source.name || "BMSIT&M source";
+        name.textContent = source.name || "BMSITM source";
       }
       item.appendChild(name);
 
@@ -194,7 +194,7 @@
   function addThinking() {
     var placeholder = addMessage(
       "bot",
-      '<span class="thinking" role="status" aria-label="Searching the BMSIT&M knowledge base">' +
+      '<span class="thinking" role="status" aria-label="Searching the BMSITM knowledge base">' +
       "<span></span><span></span><span></span></span>"
     );
     return placeholder;
@@ -347,7 +347,7 @@
       var fresh = document.createElement("section");
       fresh.className = "welcome";
       fresh.innerHTML =
-        "<h2>New chat</h2><p>Ask me anything about BMSIT&M admissions, courses, " +
+        "<h2>New chat</h2><p>Ask me anything about BMSITM admissions, courses, " +
         "placements, hostels or campus facilities.</p>";
       conversation.appendChild(fresh);
       welcome = fresh;

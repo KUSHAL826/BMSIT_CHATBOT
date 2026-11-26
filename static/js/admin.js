@@ -79,7 +79,7 @@ async function triggerScrapeNow(force = false) {
     liveBadge.className = "status-badge";
     liveBadge.style.color = "#38bdf8";
   }
-  statusMsg.textContent = force ? "Starting full re-crawl and force embedding all pages..." : "Starting BMSIT&M crawler...";
+  statusMsg.textContent = force ? "Starting full re-crawl and force embedding all pages..." : "Starting BMSITM crawler...";
   fillBar.style.width = "15%";
 
   try {
@@ -488,7 +488,7 @@ function initDocumentViewerModal() {
           externalLink.textContent = "↗ Open Live Webpage";
         } else {
           externalLink.href = "https://bmsit.ac.in";
-          externalLink.textContent = "🌐 Open BMSIT&M Website";
+          externalLink.textContent = "🌐 Open BMSITM Website";
         }
 
         if (textContainer) {

@@ -98,7 +98,7 @@ class QueryRewriter:
             if recent_turns:
                 history_context = "Conversation History:\n" + "\n".join(recent_turns) + "\n\n"
 
-        prompt = f"""You are an expert Search Query Rewriter for the B.M.S. Institute of Technology and Management (BMSIT&M) knowledge base search engine.
+        prompt = f"""You are an expert Search Query Rewriter for the B.M.S. Institute of Technology and Management (BMSITM) knowledge base search engine.
 Your task is to rewrite the user's latest question into an optimal, standalone search query.
 
 Guidelines:

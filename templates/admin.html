@@ -4,7 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>BMSIT&amp;M College AI Agent - Admin & Training Dashboard</title>
+  <title>BMSITM College AI Agent - Admin & Training Dashboard</title>
   <link rel="stylesheet" href="/static/css/admin.css">
 </head>
 
@@ -15,13 +15,13 @@
     <header class="header">
       <div class="brand-section">
         <a href="https://bmsit.ac.in" target="_blank" rel="noopener noreferrer"
-          style="display: flex; align-items: center; text-decoration: none;" title="Visit BMSIT&amp;M Official Website">
-          <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMSIT&amp;M Logo"
+          style="display: flex; align-items: center; text-decoration: none;" title="Visit BMSITM Official Website">
+          <img src="{{ url_for('static', filename='img/bmsit-logo.svg') }}" alt="BMSITM Logo"
             style="height: 48px; background: #ffffff; padding: 3px 8px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.25); object-fit: contain;"
             onerror="this.onerror=null; this.src='{{ url_for('static', filename='img/bmsit-header.png') }}';">
         </a>
         <div class="brand-title">
-          <h1>BMSIT&amp;M AI Agent Admin & Training</h1>
+          <h1>BMSITM AI Agent Admin & Training</h1>
           <p>B.M.S. Institute of Technology and Management | Autonomous RAG Knowledge Base</p>
         </div>
       </div>
@@ -98,14 +98,14 @@
       <section class="panel">
         <div class="panel-header">
           <div>
-            <h2 class="panel-title">🌐 BMSIT&amp;M Website Knowledge Scraper</h2>
-            <p class="panel-desc">Scrapes BMSIT&amp;M college web pages and faculty LinkedIn profiles (text only; documents,
+            <h2 class="panel-title">🌐 BMSITM Website Knowledge Scraper</h2>
+            <p class="panel-desc">Scrapes BMSITM college web pages and faculty LinkedIn profiles (text only; documents,
               photos, and other external links excluded).</p>
           </div>
         </div>
 
         <div class="form-group">
-          <label class="form-label" for="target-url-input">Target BMSIT&amp;M College URL</label>
+          <label class="form-label" for="target-url-input">Target BMSITM College URL</label>
           <input type="url" id="target-url-input" class="form-input" value="{{ settings.bmsit_url }}"
             placeholder="https://bmsit.ac.in/">
         </div>
@@ -330,7 +330,7 @@
             <h2 class="panel-title" style="margin: 0;">Website Scraping Knowledge Base</h2>
           </div>
           <p class="panel-desc" style="margin-top: 6px;">
-            Individual web pages crawled from the BMSIT&amp;M college website. Each page is tracked with its title, URL, and
+            Individual web pages crawled from the BMSITM college website. Each page is tracked with its title, URL, and
             indexed vector chunks.
           </p>
         </div>
@@ -436,7 +436,7 @@
             {% else %}
             <tr>
               <td colspan="6" style="text-align: center; color: #64748b; padding: 36px 16px;">
-                🌐 No website pages scraped yet. Click <strong>⚡ Scrape Now</strong> above to start crawling the BMSIT&amp;M
+                🌐 No website pages scraped yet. Click <strong>⚡ Scrape Now</strong> above to start crawling the BMSITM
                 website.
               </td>
             </tr>
