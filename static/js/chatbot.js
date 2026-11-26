@@ -11,6 +11,7 @@
 
   var conversation = document.getElementById("conversation");
   var welcome = document.getElementById("welcome");
+  var initialWelcomeHTML = welcome ? welcome.innerHTML : "";
   var form = document.getElementById("composer");
   var input = document.getElementById("composer-input");
   var voiceButton = document.getElementById("voice-button");
@@ -346,9 +347,10 @@
       conversation.innerHTML = "";
       var fresh = document.createElement("section");
       fresh.className = "welcome";
-      fresh.innerHTML =
-        "<h2>New chat</h2><p>Ask me anything about BMSITM admissions, courses, " +
-        "placements, hostels or campus facilities.</p>";
+      fresh.id = "welcome";
+      fresh.innerHTML = initialWelcomeHTML || (
+        "<h2>Hi! How can I help you?</h2>"
+      );
       conversation.appendChild(fresh);
       welcome = fresh;
       input.focus();
